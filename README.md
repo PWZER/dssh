@@ -20,9 +20,6 @@ cp bin/dssh-darwin-amd64 /usr/local/bin/ds
 
 # Linux
 cp bin/dssh-linux-amd64 /usr/local/bin/ds
-
-# Windows
-cp bin/dssh-windows-amd64 /usr/local/bin/ds
 ```
 
 ## Usage
