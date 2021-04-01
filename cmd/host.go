@@ -51,13 +51,16 @@ func addHostInit() {
 		},
 	}
 
+	addHostCmd.Flags().Bool("help", false, "help for this command.")
 	addHostCmd.Flags().StringVarP(&hostName, "name", "n", "", "host name")
 	addHostCmd.Flags().StringVarP(&hostUser, "user", "u", "root", "login username")
-	addHostCmd.Flags().StringVarP(&hostIP, "ip", "i", "", "remote host ip")
+	addHostCmd.Flags().StringVarP(&hostIP, "host", "h", "", "remote host ip")
 	addHostCmd.Flags().Uint16VarP(&hostPort, "port", "p", 22, "remote host port")
 	addHostCmd.Flags().StringVarP(&hostJump, "jump", "j", "", "proxy jump")
 	addHostCmd.Flags().StringVarP(&hostTags, "tags", "t", "", "tags")
 	addHostCmd.Flags().IntVarP(&hostTimeout, "timeout", "", 0, "timeout")
+	addHostCmd.MarkFlagRequired("name")
+	addHostCmd.MarkFlagRequired("host")
 	hostCmd.AddCommand(addHostCmd)
 }
 
@@ -71,13 +74,15 @@ func updateHostInit() {
 		},
 	}
 
+	updateHostCmd.Flags().Bool("help", false, "help for this command.")
 	updateHostCmd.Flags().StringVarP(&hostName, "name", "n", "", "host name")
 	updateHostCmd.Flags().StringVarP(&hostUser, "user", "u", "", "login username")
-	updateHostCmd.Flags().StringVarP(&hostIP, "ip", "i", "", "remote host ip")
+	updateHostCmd.Flags().StringVarP(&hostIP, "host", "h", "", "remote host ip")
 	updateHostCmd.Flags().Uint16VarP(&hostPort, "port", "p", 0, "remote host port")
 	updateHostCmd.Flags().StringVarP(&hostJump, "jump", "j", "", "proxy jump")
 	updateHostCmd.Flags().StringVarP(&hostTags, "tags", "t", "", "tags")
 	updateHostCmd.Flags().IntVarP(&hostTimeout, "timeout", "", -1, "timeout")
+	updateHostCmd.MarkFlagRequired("name")
 	hostCmd.AddCommand(updateHostCmd)
 }
 
@@ -91,6 +96,7 @@ func delHostInit() {
 		},
 	}
 	delHostCmd.Flags().StringVarP(&hostName, "name", "n", "", "host name")
+	delHostCmd.MarkFlagRequired("name")
 	hostCmd.AddCommand(delHostCmd)
 }
 
@@ -99,9 +105,9 @@ func init() {
 	delHostInit()
 	updateHostInit()
 
+	hostCmd.Flags().Bool("help", false, "help for this command.")
 	hostCmd.Flags().StringVarP(&hostName, "name", "n", "", "host name")
 	hostCmd.Flags().StringVarP(&hostUser, "user", "u", "", "login username")
 	hostCmd.Flags().StringVarP(&hostTags, "tags", "t", "", "tags")
-	hostCmd.MarkPersistentFlagRequired("ip")
 	rootCmd.AddCommand(hostCmd)
 }
