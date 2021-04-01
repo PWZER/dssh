@@ -65,19 +65,11 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.dssh.yaml)")
 
-	// parallel
+	rootCmd.Flags().Bool("help", false, "help for this command.")
 	rootCmd.Flags().IntVarP(&config.Config.Parallel, "parallel", "", 1, "max parallel run tasks num")
-
-	// jump
 	rootCmd.Flags().StringVarP(&config.Config.OverlayJump, "jump", "j", "", "ssh jump proxy")
-
-	// user
 	rootCmd.Flags().StringVarP(&config.Config.OverlayUser, "user", "u", "", "username")
-
-	// user
-	rootCmd.Flags().StringVar(&config.Config.OverlayHost, "host", "", "host name or remove host addr")
-
-	// port
+	rootCmd.Flags().StringVarP(&config.Config.OverlayHost, "host", "h", "", "host name or remove host addr")
 	rootCmd.Flags().Uint16VarP(&config.Config.OverlayPort, "port", "p", 0, "remote host port")
 
 	// tags filter
