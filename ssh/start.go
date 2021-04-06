@@ -115,7 +115,7 @@ func (cfg *SSHConfigType) start(targets []string) error {
 	}
 
 	for _, task := range cfg.Tasks {
-		task.Target.Overlay()
+		task.Target.SetOverlayValue()
 		message := fmt.Sprintf("-----> [%d / %d] %s %s <-----",
 			task.Index+1, len(cfg.Tasks), task.Target.String(), task.Message)
 		terminalWidth := GetTerminalWidth()
