@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -25,10 +26,16 @@ type Host struct {
 }
 
 func (host *Host) EndPoint() string {
+	if host.Port == 0 {
+		return host.Host
+	}
 	return fmt.Sprintf("%v:%v", host.Host, host.Port)
 }
 
 func (host *Host) String() string {
+	if host.User == "" {
+		return host.EndPoint()
+	}
 	return fmt.Sprintf("%v@%v", host.User, host.EndPoint())
 }
 
@@ -45,7 +52,40 @@ func (host *Host) Row() string {
 		host.Name, host.Host, host.User, host.Port, host.Jump, host.Tags, host.Timeout)
 }
 
-func (host *Host) Overlay() {
+func (host *Host) SetDefaultValue() {
+	if host.User == "" {
+		if Config.DefaultUser != "" {
+			host.User = Config.DefaultUser
+		} else {
+			host.User = "root"
+		}
+	}
+
+	if host.Port == 0 {
+		if Config.DefaultPort > 0 {
+			host.Port = Config.DefaultPort
+		} else {
+			host.Port = 22
+		}
+	}
+
+	if host.Jump == "" && Config.DefaultJump != "" {
+		host.Jump = Config.DefaultJump
+		host.JumpList = Config.JumpHosts
+	}
+
+	if host.Timeout < 0 {
+		if Config.DefaultTimeout >= 0 {
+			host.Timeout = Config.DefaultTimeout
+		} else {
+			host.Timeout = 0
+		}
+	}
+}
+
+func (host *Host) SetOverlayValue() {
+	host.SetDefaultValue()
+
 	if Config.OverlayUser != "" {
 		host.User = Config.OverlayUser
 	}
@@ -65,6 +105,25 @@ func (host *Host) Overlay() {
 	}
 }
 
+func (host *Host) TagsFormat() {
+	var tags []string
+	for _, tag := range strings.Split(host.Tags, ",") {
+		if tag != "" && tag != "all" {
+			existed := false
+			for _, tag_ := range tags {
+				if tag == tag_ {
+					existed = true
+					break
+				}
+			}
+			if existed == false {
+				tags = append(tags, tag)
+			}
+		}
+	}
+	host.Tags = strings.Join(sort.StringSlice(tags), ",")
+}
+
 func (host *Host) parse(isJump bool) (err error) {
 	// user, host
 	if parts := strings.Split(host.Addr, "@"); len(parts) > 2 {
@@ -74,9 +133,6 @@ func (host *Host) parse(isJump bool) (err error) {
 		host.Host = parts[1]
 	} else {
 		host.Host = host.Addr
-	}
-	if host.User == "" {
-		host.User = "root"
 	}
 
 	if host.Host == "" {
@@ -96,9 +152,6 @@ func (host *Host) parse(isJump bool) (err error) {
 			host.Port = uint16(port)
 		}
 	}
-	if host.Port == 0 {
-		host.Port = 22
-	}
 
 	// tags
 	if err := CheckTags(host.Tags); err != nil {
@@ -112,7 +165,7 @@ func (host *Host) parse(isJump bool) (err error) {
 
 	// jump
 	if !isJump {
-		if host.Jump == "" && host.Jump != "none" {
+		if host.Jump != "" && host.Jump != "none" {
 			for _, hostString := range strings.Split(host.Jump, ",") {
 				if len(hostString) == 0 {
 					continue
@@ -129,9 +182,8 @@ func (host *Host) parse(isJump bool) (err error) {
 		}
 	}
 
-	// timeout
-	if host.Timeout < 0 {
-		host.Timeout = 0
+	if isJump {
+		host.SetDefaultValue()
 	}
 	return err
 }
@@ -156,17 +208,12 @@ func AddHost(name string, user string, ip string, port uint16, jump string, tags
 	if _, exist := Config.Hosts[name]; exist {
 		return fmt.Errorf("host name \"%s\" already existed!", name)
 	}
-	if user == "" {
-		user = "root"
-	}
-	if port == 0 {
-		port = 22
-	}
-	if timeout < 0 {
-		timeout = 0
-	}
 	host := &Host{Name: name, User: user, Host: ip, Port: port, Jump: jump, Tags: tags, Timeout: timeout}
 	host.Addr = host.String()
+	host.TagsFormat()
+	if host.Timeout < 0 {
+		host.Timeout = 0
+	}
 	Config.Hosts[name] = host
 	return saveConfig()
 }
@@ -198,6 +245,7 @@ func UpdateHost(name string, user string, ip string, port uint16, jump string, t
 		host.Timeout = timeout
 	}
 	host.Addr = host.String()
+	host.TagsFormat()
 	Config.Hosts[name] = host
 	return saveConfig()
 }

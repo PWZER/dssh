@@ -53,9 +53,9 @@ func addHostInit() {
 
 	addHostCmd.Flags().Bool("help", false, "help for this command.")
 	addHostCmd.Flags().StringVarP(&hostName, "name", "n", "", "host name")
-	addHostCmd.Flags().StringVarP(&hostUser, "user", "u", "root", "login username")
+	addHostCmd.Flags().StringVarP(&hostUser, "user", "u", "", "login username")
 	addHostCmd.Flags().StringVarP(&hostIP, "host", "h", "", "remote host ip")
-	addHostCmd.Flags().Uint16VarP(&hostPort, "port", "p", 22, "remote host port")
+	addHostCmd.Flags().Uint16VarP(&hostPort, "port", "p", 0, "remote host port")
 	addHostCmd.Flags().StringVarP(&hostJump, "jump", "j", "", "proxy jump")
 	addHostCmd.Flags().StringVarP(&hostTags, "tags", "t", "", "tags")
 	addHostCmd.Flags().IntVarP(&hostTimeout, "timeout", "", 0, "timeout")

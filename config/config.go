@@ -16,9 +16,12 @@ import (
 )
 
 type ConfigType struct {
-	ModulesDir     string           `yaml:"modulesDir"`
-	SSHAuthSock    string           `yaml:"sshAuthSock"`
-	DefaultJump    string           `yaml:"defaultJump"`
+	ModulesDir     string           `yaml:"modulesDir,omitempty"`
+	SSHAuthSock    string           `yaml:"sshAuthSock,omitempty"`
+	DefaultTimeout int              `yaml:"defaultTimeout,omitempty"`
+	DefaultUser    string           `yaml:"defaultUser,omitempty"`
+	DefaultPort    uint16           `yaml:"defaultPort,omitempty"`
+	DefaultJump    string           `yaml:"defaultJump,omitempty"`
 	Hosts          map[string]*Host `yaml:"hosts"`
 	Parallel       int              `yaml:"-"`
 	OverlayTimeout int              `yaml:"-"`
@@ -40,7 +43,7 @@ func getSSHAuthSock() (sock string) {
 	return sock
 }
 
-func InitConfig() error {
+func LoadConfig() error {
 	if err := viper.Unmarshal(Config); err != nil {
 		return err
 	}
@@ -51,6 +54,7 @@ func InitConfig() error {
 
 	for name, host := range Config.Hosts {
 		host.Name = name
+		host.TagsFormat()
 		if err := host.Parse(); err != nil {
 			return err
 		}
@@ -107,7 +111,7 @@ func ConfigHostsFilter(name string, user string, tags string) (hosts []*Host, er
 
 			hasTags := false
 			for _, tag := range strings.Split(tags, ",") {
-				if strings.Contains(host.Tags, tag) {
+				if tag == "all" || strings.Contains(host.Tags, tag) {
 					hasTags = true
 					break
 				}

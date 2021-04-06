@@ -108,7 +108,7 @@ func initConfig() {
 	viper.SetConfigType("yaml")
 
 	if err := viper.ReadInConfig(); err == nil {
-		if err := config.InitConfig(); err != nil {
+		if err := config.LoadConfig(); err != nil {
 			fmt.Printf("load config file failed! %s err: %s", viper.ConfigFileUsed(), err.Error())
 			os.Exit(1)
 		}
