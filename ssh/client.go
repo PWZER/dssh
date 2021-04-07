@@ -47,60 +47,25 @@ func (c *Client) ForwardToAgent() (err error) {
 	return agent.ForwardToAgent(c.sshClient, a)
 }
 
-func (c *Client) MakeSession() (session *ssh.Session, finalize func(), err error) {
+func (c *Client) MakeSession() (session *ssh.Session, err error) {
 	if session, err = c.sshClient.NewSession(); err != nil {
-		return session, finalize, err
-	}
-
-	finalize = func() {
-		session.Close()
+		return session, err
 	}
 
 	session.Stdin = os.Stdin
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
-
-	fd := int(os.Stdin.Fd())
-	if terminal.IsTerminal(fd) {
-		var oldState *terminal.State
-		if oldState, err = terminal.MakeRaw(fd); err != nil {
-			finalize()
-			return session, finalize, err
-		}
-
-		finalize = func() {
-			session.Close()
-			terminal.Restore(fd, oldState)
-		}
-
-		var termWidth, termHeight int
-		if termWidth, termHeight, err = terminal.GetSize(fd); err != nil {
-			finalize()
-			return session, finalize, err
-		}
-
-		modes := ssh.TerminalModes{
-			ssh.ECHO:          1,     // enable echoing
-			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
-			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
-		}
-		err = session.RequestPty("xterm-256color", termHeight, termWidth, modes)
-	}
-	// agent forward
-	c.ForwardToAgent()
-	agent.RequestAgentForwarding(session)
-	// 自动调节窗口大小
-	go c.UpdateTerminalSize(session)
-	return session, finalize, err
+	return session, err
 }
 
 func (c *Client) Execute(cmd string) (exitCode int, err error) {
 	exitCode = -1
-	session, finalize, err := c.MakeSession()
+	session, err := c.MakeSession()
 	if err != nil {
 		return exitCode, err
 	}
-	defer finalize()
+	defer session.Close()
+
 	if err = session.Start(cmd); err != nil {
 		return exitCode, err
 	}
@@ -123,15 +88,40 @@ func (c *Client) Script(path string) (int, error) {
 }
 
 func (c *Client) Shell() error {
-	session, finalize, err := c.MakeSession()
+	session, err := c.MakeSession()
 	if err != nil {
 		return err
 	}
-	defer finalize()
+	defer session.Close()
+
+	fd := int(os.Stdin.Fd())
+	if terminal.IsTerminal(fd) {
+		var oldState *terminal.State
+		if oldState, err = terminal.MakeRaw(fd); err != nil {
+			return err
+		}
+		defer terminal.Restore(fd, oldState)
+
+		var termWidth, termHeight int
+		if termWidth, termHeight, err = terminal.GetSize(fd); err != nil {
+			return err
+		}
+		modes := ssh.TerminalModes{
+			ssh.ECHO:          1,     // enable echoing
+			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
+			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
+		}
+		err = session.RequestPty("xterm-256color", termHeight, termWidth, modes)
+	}
+
+	// agent forward
+	c.ForwardToAgent()
+	agent.RequestAgentForwarding(session)
+	// 自动调节窗口大小
+	go c.UpdateTerminalSize(session)
 
 	if err = session.Shell(); err != nil {
 		return err
 	}
-	session.Wait()
-	return nil
+	return session.Wait()
 }
