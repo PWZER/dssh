@@ -39,27 +39,30 @@ func (c *Client) Connect(host *config.Host) (err error) {
 	return err
 }
 
-func (c *Client) ForwardToAgent() (err error) {
+func (c *Client) RequestAgentForwarding(session *ssh.Session) error {
 	a, err := NewAgent()
 	if err != nil {
 		return err
 	}
-	return agent.ForwardToAgent(c.sshClient, a)
+	if err := agent.ForwardToAgent(c.sshClient, a); err != nil {
+		return err
+	}
+	return agent.RequestAgentForwarding(session)
 }
 
-func (c *Client) MakeSession() (session *ssh.Session, err error) {
-	if session, err = c.sshClient.NewSession(); err != nil {
+func (c *Client) MakeSession() (*ssh.Session, error) {
+	session, err := c.sshClient.NewSession()
+	if err != nil {
 		return session, err
 	}
-
 	session.Stdin = os.Stdin
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
-	return session, err
+	return session, nil
 }
 
-func (c *Client) Execute(cmd string) (exitCode int, err error) {
-	exitCode = -1
+func (c *Client) Execute(cmd string) (int, error) {
+	exitCode := 0
 	session, err := c.MakeSession()
 	if err != nil {
 		return exitCode, err
@@ -73,8 +76,6 @@ func (c *Client) Execute(cmd string) (exitCode int, err error) {
 		if werr, ok := err.(*ssh.ExitError); ok {
 			exitCode = werr.ExitStatus()
 		}
-	} else {
-		exitCode = 0
 	}
 	return exitCode, err
 }
@@ -94,31 +95,36 @@ func (c *Client) Shell() error {
 	}
 	defer session.Close()
 
+	// agent forward
+	if err := c.RequestAgentForwarding(session); err != nil {
+		return err
+	}
+
+	// auto update window size
+	go c.UpdateTerminalSize(session)
+
 	fd := int(os.Stdin.Fd())
 	if terminal.IsTerminal(fd) {
-		var oldState *terminal.State
-		if oldState, err = terminal.MakeRaw(fd); err != nil {
+		oldState, err := terminal.MakeRaw(fd)
+		if err != nil {
 			return err
 		}
 		defer terminal.Restore(fd, oldState)
 
-		var termWidth, termHeight int
-		if termWidth, termHeight, err = terminal.GetSize(fd); err != nil {
+		termWidth, termHeight, err := terminal.GetSize(fd)
+		if err != nil {
 			return err
 		}
+
 		modes := ssh.TerminalModes{
 			ssh.ECHO:          1,     // enable echoing
 			ssh.TTY_OP_ISPEED: 14400, // input speed = 14.4kbaud
 			ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
 		}
-		err = session.RequestPty("xterm-256color", termHeight, termWidth, modes)
+		if err := session.RequestPty("xterm-256color", termHeight, termWidth, modes); err != nil {
+			return err
+		}
 	}
-
-	// agent forward
-	c.ForwardToAgent()
-	agent.RequestAgentForwarding(session)
-	// 自动调节窗口大小
-	go c.UpdateTerminalSize(session)
 
 	if err = session.Shell(); err != nil {
 		return err
