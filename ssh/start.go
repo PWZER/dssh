@@ -3,6 +3,7 @@ package ssh
 import (
 	"fmt"
 	"math"
+	"os"
 	"strings"
 
 	"github.com/PWZER/dssh/config"
@@ -123,7 +124,7 @@ func (cfg *SSHConfigType) start(targets []string) error {
 		if fillLen > 0 {
 			message = fmt.Sprintf("\033[1;32m%s%s\033[0m", message, strings.Repeat("-", fillLen))
 		}
-		fmt.Println(message)
+		fmt.Fprintln(os.Stderr, message)
 
 		if err := task.Start(); err != nil {
 			if cfg.FailedContinue {
