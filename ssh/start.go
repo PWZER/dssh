@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"golang.org/x/crypto/ssh/terminal"
+
 	"github.com/PWZER/dssh/config"
 )
 
@@ -117,14 +119,17 @@ func (cfg *SSHConfigType) start(targets []string) error {
 
 	for _, task := range cfg.Tasks {
 		task.Target.SetOverlayValue()
-		message := fmt.Sprintf("-----> [%d / %d] %s %s <-----",
-			task.Index+1, len(cfg.Tasks), task.Target.String(), task.Message)
-		terminalWidth := GetTerminalWidth()
-		fillLen := terminalWidth - int(math.Mod(float64(len(message)), float64(terminalWidth)))
-		if fillLen > 0 {
-			message = fmt.Sprintf("\033[1;32m%s%s\033[0m", message, strings.Repeat("-", fillLen))
+
+		termWidth, _, err := terminal.GetSize(int(os.Stdin.Fd()))
+		if err == nil && termWidth > 0 {
+			message := fmt.Sprintf("-----> [%d / %d] %s %s <-----",
+				task.Index+1, len(cfg.Tasks), task.Target.String(), task.Message)
+			fillLen := termWidth - int(math.Mod(float64(len(message)), float64(termWidth)))
+			if fillLen > 0 {
+				message = fmt.Sprintf("\033[1;32m%s%s\033[0m", message, strings.Repeat("-", fillLen))
+			}
+			fmt.Fprintln(os.Stderr, message)
 		}
-		fmt.Fprintln(os.Stderr, message)
 
 		if err := task.Start(); err != nil {
 			if cfg.FailedContinue {
