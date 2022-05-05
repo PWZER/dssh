@@ -61,7 +61,6 @@ func GetClientConfig(host *config.Host) *gossh.ClientConfig {
 			fmt.Println(message)
 			return nil
 		},
-		HostKeyCallback:   gossh.InsecureIgnoreHostKey(),
-		HostKeyAlgorithms: []string{gossh.KeyAlgoDSA, gossh.KeyAlgoRSA},
+		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
 	}
 }
