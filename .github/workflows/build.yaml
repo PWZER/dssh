@@ -1,0 +1,63 @@
+name: Build
+on:
+  workflow_dispatch:
+  push:
+    paths-ignore:
+      - "README.md"
+    # branches:
+    #   - main
+    tags:
+      - "v*"
+  pull_request_target:
+    branches:
+      - main
+      - dev
+jobs:
+  build:
+    permissions: write-all
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04]
+      fail-fast: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: .
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v3
+
+      - name: Set variables
+        if: ${{github.ref_name=='main'}}
+        run: echo "VERSION=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Set variables
+        if: ${{github.ref_name=='' || github.ref_type=='tag'}}
+        run: echo "VERSION=$(git describe --tags)" >> $GITHUB_ENV
+
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: "1.23.0"
+          check-latest: true
+
+      - name: Install UPX
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          install-only: true
+
+      - name: Build dssh
+        run: make all
+
+      - name: Compress binaries
+        run: make compress
+
+      - name: Upload Release
+        if: ${{ success() && github.ref_type=='tag' }}
+        uses: softprops/action-gh-release@v1
+        with:
+          tag: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: bin/dssh-*
+          generate_release_notes: true
