@@ -1,3 +1,4 @@
+//go:build linux || darwin
 // +build linux darwin
 
 package ssh
@@ -8,7 +9,7 @@ import (
 	"syscall"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 // 监听窗口大小变化，并自动调节
@@ -21,7 +22,7 @@ func (c *Client) UpdateTerminalSize(session *ssh.Session) {
 		if receivedSignal == nil {
 			break
 		}
-		if currTermWidth, currTermHeight, err := terminal.GetSize(int(os.Stdin.Fd())); err != nil {
+		if currTermWidth, currTermHeight, err := term.GetSize(int(os.Stdin.Fd())); err != nil {
 			continue
 		} else if currTermHeight != termHeight || currTermWidth != termWidth {
 			if err := session.WindowChange(currTermHeight, currTermWidth); err != nil {
