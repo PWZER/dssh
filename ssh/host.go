@@ -6,14 +6,14 @@ import (
 	"syscall"
 
 	gossh "golang.org/x/crypto/ssh"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 
 	"github.com/PWZER/dssh/config"
 )
 
 func getPassword(host *config.Host) (password string, err error) {
 	fmt.Printf("Enter Password (%s): ", host.String())
-	bytePassword, err := terminal.ReadPassword(int(syscall.Stdin))
+	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 	if err != nil {
 		return password, err
 	}

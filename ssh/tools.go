@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 )
 
 func GetSSHLocalHost() string {
@@ -17,7 +17,7 @@ func GetSSHLocalHost() string {
 }
 
 func GetTerminalWidth() int {
-	termWidth, _, err := terminal.GetSize(int(os.Stdin.Fd()))
+	termWidth, _, err := term.GetSize(int(os.Stdin.Fd()))
 	if err != nil {
 		return 80
 	}

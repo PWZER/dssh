@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 
 	"github.com/PWZER/dssh/config"
 )
@@ -120,7 +120,7 @@ func (cfg *SSHConfigType) start(targets []string) error {
 	for _, task := range cfg.Tasks {
 		task.Target.SetOverlayValue()
 
-		termWidth, _, err := terminal.GetSize(int(os.Stdin.Fd()))
+		termWidth, _, err := term.GetSize(int(os.Stdin.Fd()))
 		if err == nil && termWidth > 0 {
 			message := fmt.Sprintf("-----> [%d / %d] %s %s <-----",
 				task.Index+1, len(cfg.Tasks), task.Target.String(), task.Message)

@@ -1,13 +1,12 @@
 package ssh
 
 import (
-	"io/ioutil"
 	"os"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/term"
 
 	"github.com/PWZER/dssh/config"
 )
@@ -81,7 +80,7 @@ func (c *Client) Execute(cmd string) (int, error) {
 }
 
 func (c *Client) Script(path string) (int, error) {
-	content, err := ioutil.ReadFile(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return -1, err
 	}
@@ -104,14 +103,14 @@ func (c *Client) Shell() error {
 	go c.UpdateTerminalSize(session)
 
 	fd := int(os.Stdin.Fd())
-	if terminal.IsTerminal(fd) {
-		oldState, err := terminal.MakeRaw(fd)
+	if term.IsTerminal(fd) {
+		oldState, err := term.MakeRaw(fd)
 		if err != nil {
 			return err
 		}
-		defer terminal.Restore(fd, oldState)
+		defer term.Restore(fd, oldState)
 
-		termWidth, termHeight, err := terminal.GetSize(fd)
+		termWidth, termHeight, err := term.GetSize(fd)
 		if err != nil {
 			return err
 		}
