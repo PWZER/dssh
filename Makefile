@@ -5,6 +5,12 @@ GO_BUILD_COMMAND := go build -a -ldflags '-s -w -extldflags "-static" -X "github
 
 all: darwin linux
 
+format:
+	go fmt ./...
+
+build:
+	$(GO_BUILD_COMMAND) -o bin/dssh .
+
 compress:
 	upx --best bin/* || true
 
@@ -25,4 +31,4 @@ linux-arm64:
 linux: linux-amd64 linux-arm64
 
 install:
-	GOOS=$(shell uname | tr '[:upper:]' '[:lower:]') GOARCH=$(shell go env GOARCH) $(GO_BUILD_COMMAND) -o ~/.local/bin/dssh .
+	$(GO_BUILD_COMMAND) -o ~/.local/bin/dssh .

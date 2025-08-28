@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/pkg/sftp"
@@ -9,6 +10,8 @@ import (
 	"golang.org/x/term"
 
 	"github.com/PWZER/dssh/config"
+	"github.com/PWZER/dssh/logger"
+	"github.com/PWZER/dssh/utils"
 )
 
 type Client struct {
@@ -21,16 +24,16 @@ func NewClient() *Client {
 }
 
 func (c *Client) Connect(host *config.Host) (err error) {
-	config := GetClientConfig(host)
+	clientConfig := CreateClientConfig(host)
 	if c.sshClient == nil {
-		c.sshClient, err = ssh.Dial("tcp", host.EndPoint(), config)
+		c.sshClient, err = ssh.Dial("tcp", host.EndPoint(), clientConfig)
 		return err
 	}
 	dial, err := c.sshClient.Dial("tcp", host.EndPoint())
 	if err != nil {
 		return err
 	}
-	conn, chans, reqs, err := ssh.NewClientConn(dial, host.EndPoint(), config)
+	conn, chans, reqs, err := ssh.NewClientConn(dial, host.EndPoint(), clientConfig)
 	if err != nil {
 		return err
 	}
@@ -87,7 +90,7 @@ func (c *Client) Script(path string) (int, error) {
 	return c.Execute(string(content))
 }
 
-func (c *Client) Shell() error {
+func (c *Client) Shell(remoteListen, proxyServer string) error {
 	session, err := c.MakeSession()
 	if err != nil {
 		return err
@@ -97,6 +100,11 @@ func (c *Client) Shell() error {
 	// agent forward
 	if err := c.RequestAgentForwarding(session); err != nil {
 		return err
+	}
+
+	// remote proxy
+	if remoteListen != "" && proxyServer != "" {
+		go c.RemoteProxy(remoteListen, proxyServer)
 	}
 
 	// auto update window size
@@ -129,4 +137,25 @@ func (c *Client) Shell() error {
 		return err
 	}
 	return session.Wait()
+}
+
+func (c *Client) RemoteProxy(listenAddr, serverAddr string) error {
+	listener, err := c.sshClient.Listen("tcp", listenAddr)
+	if err != nil {
+		return fmt.Errorf("Listen Error: %v", err)
+	}
+	defer listener.Close()
+	logger.Infof("Listening on %s", listenAddr)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			logger.Errorf("Accept Error: %v", err)
+			continue
+		}
+		logger.Infof("Accepted from %s", conn.RemoteAddr())
+		if err := utils.CopyConn(conn, serverAddr); err != nil {
+			logger.Errorf("CopyConn Error: %v", err)
+		}
+	}
 }

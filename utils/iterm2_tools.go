@@ -5,14 +5,6 @@ import (
 	"os"
 )
 
-//func GetTerminalWidth() int {
-//    termWidth, _, err := terminal.GetSize(int(os.Stdin.Fd()))
-//    if err != nil {
-//        return 80
-//    }
-//    return termWidth
-//}
-
 func SetWindowTitle(title string) (err error) {
 	if os.Getenv("LC_TERMINAL") == "iTerm2" {
 		if title == "" {

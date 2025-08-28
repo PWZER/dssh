@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,17 +17,21 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"os"
+
+	"github.com/spf13/cobra"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 
 	"github.com/PWZER/dssh/config"
+	"github.com/PWZER/dssh/logger"
 	"github.com/PWZER/dssh/ssh"
 )
 
 var cfgFile string
+var showVersion bool
+var taskConfig *config.TaskConfig = config.NewTaskConfig()
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -36,12 +40,29 @@ var rootCmd = &cobra.Command{
 	Long:          "A command-line tools for ssh",
 	SilenceUsage:  true,
 	SilenceErrors: true,
-	Version:       "v1.0.0",
 	Args: func(cmd *cobra.Command, args []string) error {
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return ssh.Start(ssh.SSHConfig, args)
+		if showVersion {
+			printVersion()
+			return nil
+		}
+
+		if len(taskConfig.Targets) > 0 {
+			if len(args) > 0 {
+				return fmt.Errorf("host name and args can not be used together")
+			}
+		} else {
+			if len(args) == 0 {
+				return fmt.Errorf("host name is required")
+			}
+			taskConfig.Targets = append(taskConfig.Targets, args...)
+		}
+		if err := taskConfig.InitTasks(); err != nil {
+			return err
+		}
+		return ssh.Start(taskConfig)
 	},
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) != 0 {
@@ -64,30 +85,36 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.dssh.yaml)")
+	rootCmd.PersistentFlags().VarP(&logger.LogLevel, "log-level", "l", "log level, allowed ( debug, info, warn, error, fatal, panic )")
 
-	rootCmd.Flags().Bool("help", false, "help for this command.")
-	rootCmd.Flags().IntVarP(&config.Config.Parallel, "parallel", "", 1, "max parallel run tasks num")
-	rootCmd.Flags().StringVarP(&config.Config.OverlayJump, "jump", "j", "", "ssh jump proxy")
-	rootCmd.Flags().StringVarP(&config.Config.OverlayUser, "user", "u", "", "username")
-	rootCmd.Flags().StringVarP(&config.Config.OverlayHost, "host", "h", "", "host name or remove host addr")
-	rootCmd.Flags().Uint16VarP(&config.Config.OverlayPort, "port", "p", 0, "remote host port")
+	// version
+	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "show version")
 
-	// tags filter
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.Tags, "tags", "t", "", "tags filter")
-	rootCmd.Flags().BoolVarP(&ssh.SSHConfig.FailedContinue, "force", "f", false, "force run when failed")
+	// task config
+	rootCmd.Flags().StringArrayVar(&taskConfig.Targets, "host", []string{}, "host name")
+	rootCmd.Flags().StringVarP(&taskConfig.Username, "user", "u", "", "username")
+	rootCmd.Flags().Uint16VarP(&taskConfig.Port, "port", "p", 0, "remote host port")
+	rootCmd.Flags().StringArrayVar(&taskConfig.IdentityFiles, "identity", []string{}, "identity file")
+	rootCmd.Flags().IntVarP(&taskConfig.Parallel, "parallel", "", 1, "max parallel run tasks num")
+	rootCmd.Flags().StringVarP(&taskConfig.Tags, "tags", "t", "", "tags filter")
+	rootCmd.Flags().BoolVarP(&taskConfig.FailedContinue, "force", "f", false, "force run when failed")
 
 	// remote command
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.Command, "command", "c", "", "remote run command")
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.Script, "script", "s", "", "remote run script")
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.Module, "module", "m", "", "remote run module")
+	rootCmd.Flags().StringVarP(&taskConfig.Command, "command", "c", "", "remote run command")
+	rootCmd.Flags().StringVarP(&taskConfig.Script, "script", "s", "", "remote run script")
+	rootCmd.Flags().StringVarP(&taskConfig.Module, "module", "m", "", "remote run module")
+
+	// remote proxy
+	rootCmd.Flags().StringVar(&taskConfig.RemoteListen, "remote-listen", "", "remote proxy listen address")
+	rootCmd.Flags().StringVar(&taskConfig.ProxyServer, "proxy-server", "", "proxy server address")
 
 	// get
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.DownloadSrc, "get-src", "", "", "download remote src path")
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.DownloadDest, "get-dest", "", "", "download local dest path")
+	rootCmd.Flags().StringVarP(&taskConfig.DownloadSrc, "get-src", "", "", "download remote src path")
+	rootCmd.Flags().StringVarP(&taskConfig.DownloadDest, "get-dest", "", "", "download local dest path")
 
 	// put
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.UploadSrc, "put-src", "", "", "upload local src path")
-	rootCmd.Flags().StringVarP(&ssh.SSHConfig.UploadDest, "put-dest", "", "", "upload remote dest path")
+	rootCmd.Flags().StringVarP(&taskConfig.UploadSrc, "put-src", "", "", "upload local src path")
+	rootCmd.Flags().StringVarP(&taskConfig.UploadDest, "put-dest", "", "", "upload remote dest path")
 }
 
 // initConfig reads in config file and ENV variables if set.
