@@ -1,15 +1,16 @@
 module github.com/PWZER/dssh
 
-go 1.20
+go 1.23.0
 
 require (
+	github.com/kevinburke/ssh_config v1.4.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/pkg/sftp v1.13.5
 	github.com/schollz/progressbar/v3 v3.8.6
 	github.com/spf13/cobra v1.5.0
 	github.com/spf13/viper v1.12.0
-	golang.org/x/crypto v0.0.0-20220622213112-05595931fe9d
-	golang.org/x/term v0.0.0-20220526004731-065cf7ba2467
+	golang.org/x/crypto v0.41.0
+	golang.org/x/term v0.34.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -30,8 +31,8 @@ require (
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/subosito/gotenv v1.4.0 // indirect
-	golang.org/x/sys v0.0.0-20220624220833-87e55d714810 // indirect
-	golang.org/x/text v0.3.7 // indirect
+	golang.org/x/sys v0.35.0 // indirect
+	golang.org/x/text v0.28.0 // indirect
 	gopkg.in/ini.v1 v1.66.6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

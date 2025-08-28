@@ -2,37 +2,23 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
-	"regexp"
-	"sort"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/PWZER/dssh/logger"
 	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 	yaml "gopkg.in/yaml.v2"
 )
 
 type ConfigType struct {
-	ModulesDir     string           `yaml:"modulesDir,omitempty"`
-	SSHAuthSock    string           `yaml:"sshAuthSock,omitempty"`
-	DefaultTimeout int              `yaml:"defaultTimeout,omitempty"`
-	DefaultUser    string           `yaml:"defaultUser,omitempty"`
-	DefaultPort    uint16           `yaml:"defaultPort,omitempty"`
-	DefaultJump    string           `yaml:"defaultJump,omitempty"`
-	Hosts          map[string]*Host `yaml:"hosts"`
-	Parallel       int              `yaml:"-"`
-	OverlayTimeout int              `yaml:"-"`
-	OverlayUser    string           `yaml:"-"`
-	OverlayPort    uint16           `yaml:"-"`
-	OverlayJump    string           `yaml:"-"`
-	OverlayHost    string           `yaml:"-"`
-	JumpHosts      []*Host          `yaml:"-"`
+	ModulesDir  string `yaml:"modulesDir,omitempty"`
+	SSHAuthSock string `yaml:"sshAuthSock,omitempty"`
 }
 
-var Config = &ConfigType{Parallel: 1, OverlayTimeout: -1}
+var Config = &ConfigType{}
 
 func getSSHAuthSock() (sock string) {
 	sock = os.Getenv("SSH_AUTH_SOCK")
@@ -51,90 +37,76 @@ func LoadConfig() error {
 	if Config.SSHAuthSock == "" {
 		Config.SSHAuthSock = getSSHAuthSock()
 	}
-
-	for name, host := range Config.Hosts {
-		host.Name = name
-		host.TagsFormat()
-		if err := host.Parse(); err != nil {
-			return err
-		}
-	}
-
-	jump := Config.DefaultJump
-	if Config.OverlayJump != "" {
-		jump = Config.OverlayJump
-	}
-	if jump != "" && jump != "none" {
-		for _, hostString := range strings.Split(jump, ",") {
-			host := &Host{Addr: hostString}
-			if err := host.parse(true); err != nil {
-				return err
-			}
-			Config.JumpHosts = append(Config.JumpHosts, host)
-		}
-	}
 	return nil
 }
 
-func ConfigHostsFilter(name string, user string, tags string) (hosts []*Host, err error) {
+func FilteredHosts(name string, user string, tags string) (hosts []*Host, err error) {
+	hosts, err = GetHostsFromSSHConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	if name != "" {
-		// name filter
-		if host, ok := Config.Hosts[name]; ok {
-			hosts = append(hosts, host)
-		}
-		return hosts, err
-	}
-
-	var hostNames []string
-	for hostName := range Config.Hosts {
-		hostNames = append(hostNames, hostName)
-	}
-	sort.Strings(hostNames)
-	for _, name := range hostNames {
-		host, ok := Config.Hosts[name]
-		if !ok {
-			continue
-		}
-
-		// user filter
-		if user != "" && host.User != user {
-			continue
-		}
-
-		// tags filter
-		if tags != "" {
-			if matched, err := regexp.MatchString(`[0-9a-zA-z_\-,]*`, tags); err != nil {
-				return hosts, err
-			} else if !matched {
-				return hosts, fmt.Errorf("Invalid tags!")
+		newHosts := make([]*Host, 0)
+		for _, host := range hosts {
+			if host.HostName == name || strings.Contains(host.HostName, name) {
+				newHosts = append(newHosts, host)
 			}
+		}
+		logger.Debugf("Filtered hosts by name: %+#v", newHosts)
+		hosts = newHosts
+	}
 
-			hasTags := false
-			for _, tag := range strings.Split(tags, ",") {
-				if tag == "all" || strings.Contains(host.Tags, tag) {
-					hasTags = true
+	if user != "" {
+		newHosts := make([]*Host, 0)
+		for _, host := range hosts {
+			if host.Username == user {
+				newHosts = append(newHosts, host)
+			}
+		}
+		logger.Debugf("Filtered hosts by user: %+#v", newHosts)
+		hosts = newHosts
+	}
+
+	if tags != "" {
+		tagsMap := make(map[string]bool)
+		for _, tag := range strings.Split(tags, ",") {
+			tagsMap[tag] = true
+		}
+
+		newHosts := make([]*Host, 0)
+		for _, host := range hosts {
+			for _, tag := range host.TagList {
+				if tagsMap[tag] {
+					newHosts = append(newHosts, host)
 					break
 				}
 			}
-			if !hasTags {
-				continue
-			}
 		}
-
-		hosts = append(hosts, host)
+		logger.Debugf("Filtered hosts by tags: %+#v", newHosts)
+		hosts = newHosts
 	}
+
 	return hosts, err
 }
 
 func ListConfigHosts(name string, user string, tags string) error {
 	w := tabwriter.NewWriter(os.Stdout, 12, 8, 4, ' ', 0)
-	fmt.Fprintln(w, HOST_LIST_HEADERS)
-	hosts, err := ConfigHostsFilter(name, user, tags)
+	fmt.Fprintln(w, "PATTERNS\tHOST\tUSER\tPORT\tJUMP\tTAGS\t")
+	hosts, err := FilteredHosts(name, user, tags)
 	if err != nil {
 		return err
 	}
 	for _, host := range hosts {
-		fmt.Fprintln(w, host.Row())
+		row := fmt.Sprintf("%s\t%s\t%s\t%d\t%s\t%s\t",
+			strings.Join(host.Patterns, ","),
+			host.HostName,
+			host.Username,
+			host.Port,
+			host.ProxyJump,
+			strings.Join(host.TagList, ","),
+		)
+		fmt.Fprintln(w, row)
 	}
 	w.Flush()
 	return nil
@@ -144,6 +116,6 @@ func saveConfig() error {
 	if data, err := yaml.Marshal(Config); err != nil {
 		return err
 	} else {
-		return ioutil.WriteFile(viper.ConfigFileUsed(), data, 0644)
+		return os.WriteFile(viper.ConfigFileUsed(), data, 0644)
 	}
 }
