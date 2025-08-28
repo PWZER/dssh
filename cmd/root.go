@@ -85,7 +85,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.dssh.yaml)")
-	rootCmd.PersistentFlags().VarP(&logger.LogLevel, "log-level", "l", "log level, allowed ( debug, info, warn, error, fatal, panic )")
+	rootCmd.PersistentFlags().Var(&logger.LogLevel, "log-level", "log level, allowed ( debug, info, warn, error, fatal, panic )")
 
 	// version
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "v", false, "show version")
