@@ -72,6 +72,9 @@ func GetHostsFromSSHConfig() (hosts []*Host, err error) {
 			continue
 		}
 
+		// 从正则配置中解析
+		host.FillAttrsWithSSHConfig()
+
 		// tags
 		if hostConfig.EOLComment != "" {
 			tagsRegex := regexp.MustCompile(`tags:([0-9a-zA-z_\-,]*)`)
@@ -92,4 +95,20 @@ func GetHostsFromSSHConfig() (hosts []*Host, err error) {
 	}
 
 	return hosts, nil
+}
+
+func GetHostNames() (names []string) {
+	hosts, err := GetHostsFromSSHConfig()
+	if err != nil {
+		return nil
+	}
+	for _, host := range hosts {
+		for _, pattern := range host.Patterns {
+			if strings.ContainsAny(pattern, "*!?") {
+				continue
+			}
+			names = append(names, pattern)
+		}
+	}
+	return names
 }
