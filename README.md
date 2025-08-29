@@ -75,11 +75,4 @@ Default use `~/.dssh.yaml`.
 modulesDir: ""
 
 sshAuthSock: /root/.ssh/ssh_auth_sock
-
-defaultJump: root@jump.example.com:22
-
-hosts:
-  dev:
-    addr: root@10.10.10.10:22
-    tags: all
 ```
