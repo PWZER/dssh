@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -98,11 +99,15 @@ func ListConfigHosts(name string, user string, tags string) error {
 		return err
 	}
 	for _, host := range hosts {
-		row := fmt.Sprintf("%s\t%s\t%s\t%d\t%s\t%s\t",
+		port := ""
+		if host.Port != 0 {
+			port = strconv.Itoa(int(host.Port))
+		}
+		row := fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s\t",
 			strings.Join(host.Patterns, ","),
 			host.HostName,
 			host.Username,
-			host.Port,
+			port,
 			host.ProxyJump,
 			strings.Join(host.TagList, ","),
 		)

@@ -53,7 +53,10 @@ var rootCmd = &cobra.Command{
 			if len(args) > 0 {
 				return fmt.Errorf("host name and args can not be used together")
 			}
-		} else {
+			if len(taskConfig.Tags) > 0 {
+				return fmt.Errorf("host name and tags can not be used together")
+			}
+		} else if len(taskConfig.Tags) == 0 {
 			if len(args) == 0 {
 				return fmt.Errorf("host name is required")
 			}
@@ -96,7 +99,7 @@ func init() {
 	rootCmd.Flags().Uint16VarP(&taskConfig.Port, "port", "p", 0, "remote host port")
 	rootCmd.Flags().StringArrayVar(&taskConfig.IdentityFiles, "identity", []string{}, "identity file")
 	rootCmd.Flags().IntVarP(&taskConfig.Parallel, "parallel", "", 1, "max parallel run tasks num")
-	rootCmd.Flags().StringVarP(&taskConfig.Tags, "tags", "t", "", "tags filter")
+	rootCmd.Flags().StringArrayVarP(&taskConfig.Tags, "tags", "t", []string{}, "tags filter")
 	rootCmd.Flags().BoolVarP(&taskConfig.FailedContinue, "force", "f", false, "force run when failed")
 
 	// remote command

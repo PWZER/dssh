@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -51,7 +52,7 @@ type TaskConfig struct {
 	Port           uint16
 	ProxyJump      string
 	IdentityFiles  []string
-	Tags           string
+	Tags           []string
 	Targets        []string
 	RemoteListen   string
 	ProxyServer    string
@@ -101,9 +102,11 @@ func (cfg *TaskConfig) addTask(target string) (err error) {
 }
 
 func (cfg *TaskConfig) InitTasks() error {
-	if cfg.Tags != "" {
-		if err := CheckTags(cfg.Tags); err != nil {
-			return err
+	if len(cfg.Tags) > 0 {
+		for _, tag := range cfg.Tags {
+			if matched, err := regexp.MatchString(`[0-9a-zA-z_\-,]*`, tag); err != nil || !matched {
+				return fmt.Errorf("invalid tags: %s", tag)
+			}
 		}
 
 		hosts, err := GetHostsFromSSHConfig()
@@ -112,10 +115,18 @@ func (cfg *TaskConfig) InitTasks() error {
 		}
 
 		for _, host := range hosts {
+			if !host.MatchTags(cfg.Tags) {
+				continue
+			}
 			task := &Task{
-				Index: len(cfg.Tasks), Target: host,
-				UploadSrc: cfg.UploadSrc, UploadDest: cfg.UploadDest,
-				DownloadSrc: cfg.DownloadSrc, DownloadDest: cfg.DownloadDest,
+				Index:        len(cfg.Tasks),
+				Target:       host,
+				RemoteListen: cfg.RemoteListen,
+				ProxyServer:  cfg.ProxyServer,
+				UploadSrc:    cfg.UploadSrc,
+				UploadDest:   cfg.UploadDest,
+				DownloadSrc:  cfg.DownloadSrc,
+				DownloadDest: cfg.DownloadDest,
 			}
 			if err = task.ParseCommand(cfg.Command, cfg.Script, cfg.Module); err != nil {
 				return err
