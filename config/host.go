@@ -189,21 +189,19 @@ func (host *Host) fillPort() {
 }
 
 func (host *Host) fillProxyJump() {
-	if host.ProxyJump != "" {
-		return
-	}
-
-	// fill proxy jump with patterns
-	for _, pattern := range host.Patterns {
-		if strings.ContainsAny(pattern, "*!?") {
-			continue
-		}
-		host.ProxyJump = ssh_config.Get(pattern, "ProxyJump")
-	}
-
-	// fill proxy jump with host name
 	if host.ProxyJump == "" {
-		host.ProxyJump = ssh_config.Get(host.HostName, "ProxyJump")
+		// fill proxy jump with patterns
+		for _, pattern := range host.Patterns {
+			if strings.ContainsAny(pattern, "*!?") {
+				continue
+			}
+			host.ProxyJump = ssh_config.Get(pattern, "ProxyJump")
+		}
+
+		// fill proxy jump with host name
+		if host.ProxyJump == "" {
+			host.ProxyJump = ssh_config.Get(host.HostName, "ProxyJump")
+		}
 	}
 
 	// jump list

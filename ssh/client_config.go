@@ -61,7 +61,7 @@ func getSignersCallback(host *config.Host) (signers []gossh.Signer, err error) {
 			}
 
 			// 输入私钥密码
-			prompt := fmt.Sprintf("Enter Identity Passphrase (%s): ", identityFile)
+			prompt := fmt.Sprintf("[%s] Enter Identity Passphrase (%s)", host.Summary(), identityFile)
 			password, err := getPassword(prompt)
 			if err != nil {
 				logger.Warnf("get password error: %v", err)
@@ -90,7 +90,7 @@ func CreateClientConfig(host *config.Host) *gossh.ClientConfig {
 
 	// 私钥无法登录时，使用输入密码的方式
 	auth = append(auth, gossh.PasswordCallback(func() (string, error) {
-		return getPassword(fmt.Sprintf("Enter Password (%s): ", host.Summary()))
+		return getPassword(fmt.Sprintf("[%s] Enter Password: ", host.Summary()))
 	}))
 
 	// 二次验证交互等

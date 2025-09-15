@@ -97,6 +97,7 @@ func init() {
 	rootCmd.Flags().StringArrayVar(&taskConfig.Targets, "host", []string{}, "host name")
 	rootCmd.Flags().StringVarP(&taskConfig.Username, "user", "u", "", "username")
 	rootCmd.Flags().Uint16VarP(&taskConfig.Port, "port", "p", 0, "remote host port")
+	rootCmd.Flags().StringVarP(&taskConfig.ProxyJump, "jump", "j", "", "proxy jump host")
 	rootCmd.Flags().StringArrayVar(&taskConfig.IdentityFiles, "identity", []string{}, "identity file")
 	rootCmd.Flags().IntVarP(&taskConfig.Parallel, "parallel", "", 1, "max parallel run tasks num")
 	rootCmd.Flags().StringArrayVarP(&taskConfig.Tags, "tags", "t", []string{}, "tags filter")
