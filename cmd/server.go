@@ -78,7 +78,7 @@ func init() {
 
 	fileServerConfig = &server.FileServerConfig{}
 	serverCmd.Flags().StringVarP(&fileServerConfig.Bind, "bind", "b", utils.GetLocalIP(), "bind host addr.")
-	serverCmd.Flags().Int16VarP(&fileServerConfig.Port, "port", "p", 8000, "listen port.")
+	serverCmd.Flags().Uint16VarP(&fileServerConfig.Port, "port", "p", 8000, "listen port.")
 	serverCmd.Flags().StringVarP(&fileServerConfig.Root, "root", "r", "", "root path.")
 	serverCmd.Flags().BoolVarP(&fileServerConfig.Daemon, "daemon", "d", false, "run as daemon.")
 	serverCmd.Flags().StringVarP(&fileServerConfig.LogPath, "log_path", "", ".dssh_file_server.log", "log file path.")

@@ -9,7 +9,7 @@ import (
 
 type FileServerConfig struct {
 	Bind    string
-	Port    int16
+	Port    uint16
 	Root    string
 	Encrypt bool
 	Daemon  bool
