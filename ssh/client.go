@@ -39,7 +39,15 @@ func (c *Client) Connect(host *config.Host) (err error) {
 	}
 	timer := time.AfterFunc(utils.DialTimeout, func() { dial.Close() })
 	conn, chans, reqs, err := ssh.NewClientConn(dial, host.EndPoint(), clientConfig)
-	timer.Stop()
+	if !timer.Stop() {
+		// timer already fired, the connection was closed by the callback
+		if err == nil {
+			conn.Close()
+			return fmt.Errorf("handshake timeout for %s", host.EndPoint())
+		}
+		dial.Close()
+		return err
+	}
 	if err != nil {
 		dial.Close()
 		return err

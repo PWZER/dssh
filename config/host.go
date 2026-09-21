@@ -116,7 +116,12 @@ func parseHostPort(hostname string, port uint16) (string, uint16, error) {
 
 	// bare IPv6 address (multiple colons) has no port part
 	if strings.Count(hostname, ":") > 1 {
-		if net.ParseIP(hostname) == nil {
+		// strip zone id for validation, e.g. fe80::1%eth0
+		addr := hostname
+		if idx := strings.Index(addr, "%"); idx > 0 {
+			addr = addr[:idx]
+		}
+		if net.ParseIP(addr) == nil {
 			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
 		}
 		return hostname, port, nil

@@ -39,6 +39,8 @@ func TestParseHostPort(t *testing.T) {
 		{"bracketed ipv6 with port conflict", "[::1]:22", 2222, "", 0, true},
 		{"bracketed ipv6 with invalid port", "[::1]:foo", 0, "", 0, true},
 		{"unterminated bracket", "[::1:22", 0, "", 0, true},
+		{"bare ipv6 with zone", "fe80::1%eth0", 0, "fe80::1%eth0", 0, false},
+		{"bare ipv6 with zone and preset port", "fe80::1%eth0", 2222, "fe80::1%eth0", 2222, false},
 		{"invalid multi-colon", "example.com:2222:3333", 0, "", 0, true},
 		{"invalid multi-colon typo", "host:a:b", 0, "", 0, true},
 	}

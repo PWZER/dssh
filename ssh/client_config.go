@@ -16,17 +16,6 @@ import (
 	"github.com/PWZER/dssh/utils"
 )
 
-func getPassword(prompt string) (password string, err error) {
-	fmt.Printf(prompt)
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		return password, err
-	}
-	password = strings.TrimSpace(string(bytePassword))
-	fmt.Println()
-	return password, err
-}
-
 // readAnswer reads one line from reader. TTY input is read with echo
 // disabled via term.ReadPassword, piped input falls back to plain reads.
 func readAnswer(reader *bufio.Reader, hidden bool) (string, error) {
@@ -44,6 +33,11 @@ func readAnswer(reader *bufio.Reader, hidden bool) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil
+}
+
+func getPassword(prompt string) (string, error) {
+	fmt.Print(prompt)
+	return readAnswer(bufio.NewReader(os.Stdin), term.IsTerminal(int(syscall.Stdin)))
 }
 
 // doKeyboardInteractive answers keyboard-interactive questions. reader is

@@ -2,6 +2,7 @@ package ssh
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ func TestSanitizeKnownHosts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse key: %v", err)
 	}
-	validLine := "127.0.0.1 " + key.Type() + " " + strings.TrimSpace(string(gossh.MarshalAuthorizedKey(key)))
+	validLine := "127.0.0.1 " + strings.TrimSpace(string(gossh.MarshalAuthorizedKey(key)))
 
 	tests := []struct {
 		name     string
@@ -39,27 +40,57 @@ func TestSanitizeKnownHosts(t *testing.T) {
 			tmp.WriteString(tt.content)
 			tmp.Close()
 
-			sanitized, err := sanitizeKnownHosts([]string{tmp.Name()})
+			sanitized, err := sanitizeKnownHosts(tmp.Name())
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("sanitizeKnownHosts() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if err != nil {
 				return
 			}
-			if len(sanitized) == 0 {
+			if sanitized == "" {
 				// empty or all-garbage content produces no sanitized file
 				if tt.content == "" || strings.Count(tt.content, "garbage") == strings.Count(tt.content, "\n") {
 					return
 				}
-				t.Fatalf("sanitizeKnownHosts() returned no files for non-empty input")
+				t.Fatalf("sanitizeKnownHosts() returned no file for non-empty input")
 			}
-			for _, path := range sanitized {
-				defer os.Remove(path)
-				// verify the sanitized file parses cleanly
-				if _, err := knownhosts.New(path); err != nil {
-					t.Fatalf("sanitized file %s does not parse: %v", path, err)
-				}
+			defer os.Remove(sanitized)
+			// verify the sanitized file parses cleanly
+			if _, err := knownhosts.New(sanitized); err != nil {
+				t.Fatalf("sanitized file %s does not parse: %v", sanitized, err)
 			}
 		})
 	}
+}
+
+func TestNewKnownHostsChecker(t *testing.T) {
+	key, _, _, _, err := gossh.ParseAuthorizedKey([]byte("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGPKfpLL60VzCZYsDrT+jJ0Sd7cnEyv7ipHdOM0FtR1p test@example"))
+	if err != nil {
+		t.Fatalf("parse key: %v", err)
+	}
+	validLine := "127.0.0.1 " + strings.TrimSpace(string(gossh.MarshalAuthorizedKey(key)))
+
+	tmp, err := os.CreateTemp("", "dssh-test-kh-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmp.Name())
+	tmp.WriteString(validLine + "\ngarbage line here\n")
+	tmp.Close()
+
+	checker, sanitized, err := newKnownHostsChecker([]string{tmp.Name()})
+	if err != nil {
+		t.Fatalf("newKnownHostsChecker() error = %v", err)
+	}
+	if checker == nil {
+		t.Fatal("newKnownHostsChecker() returned nil checker")
+	}
+	// verify temp file is cleaned up after use
+	defer func() {
+		for _, path := range sanitized {
+			if strings.HasPrefix(filepath.Base(path), "dssh-known_hosts-") {
+				os.Remove(path)
+			}
+		}
+	}()
 }
