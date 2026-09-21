@@ -1,7 +1,9 @@
 package ssh
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"syscall"
@@ -25,11 +27,36 @@ func getPassword(prompt string) (password string, err error) {
 }
 
 func doKeyboardInteractive(user, instruction string, questions []string, echos []bool) (answers []string, err error) {
-	for _, question := range questions {
+	if instruction != "" {
+		fmt.Println(instruction)
+	}
+	// hidden answers require a real terminal, piped/scripted input falls
+	// back to plain reads so it keeps working non-interactively
+	hidden := term.IsTerminal(int(syscall.Stdin))
+	reader := bufio.NewReader(os.Stdin)
+	readLine := func() (string, error) {
+		line, err := reader.ReadString('\n')
+		// keep the partial line when the input ends without a newline
+		if err != nil && err != io.EOF {
+			return "", err
+		}
+		return strings.TrimRight(line, "\r\n"), nil
+	}
+	for i, question := range questions {
 		fmt.Print(question)
 		var answer string
-		if _, err := fmt.Scan(&answer); err != nil {
-			return answers, err
+		if i < len(echos) && !echos[i] && hidden {
+			byteAnswer, err := term.ReadPassword(int(syscall.Stdin))
+			if err != nil {
+				return answers, err
+			}
+			answer = string(byteAnswer)
+			fmt.Println()
+		} else {
+			answer, err = readLine()
+			if err != nil {
+				return answers, err
+			}
 		}
 		answers = append(answers, answer)
 	}
@@ -100,12 +127,13 @@ func CreateClientConfig(host *config.Host) *gossh.ClientConfig {
 	))
 
 	return &gossh.ClientConfig{
-		User: host.Username,
-		Auth: auth,
+		User:    host.Username,
+		Auth:    auth,
+		Timeout: dialTimeout,
 		BannerCallback: func(message string) error {
 			fmt.Println(message)
 			return nil
 		},
-		HostKeyCallback: gossh.InsecureIgnoreHostKey(),
+		HostKeyCallback: HostKeyCallback,
 	}
 }

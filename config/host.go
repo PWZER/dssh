@@ -8,8 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/PWZER/dssh/logger"
 	"github.com/kevinburke/ssh_config"
+	homedir "github.com/mitchellh/go-homedir"
+
+	"github.com/PWZER/dssh/logger"
 )
 
 type Host struct {
@@ -24,6 +26,10 @@ type Host struct {
 }
 
 func NewHost(username, hostname string, port uint16, proxyJump string, identityFiles []string) (host *Host, err error) {
+	return newHost(username, hostname, port, proxyJump, identityFiles, nil)
+}
+
+func newHost(username, hostname string, port uint16, proxyJump string, identityFiles []string, jumpChain []string) (host *Host, err error) {
 	host = &Host{
 		Username:      username,
 		HostName:      hostname,
@@ -51,44 +57,107 @@ func NewHost(username, hostname string, port uint16, proxyJump string, identityF
 		host.HostName = parts[1]
 	}
 
-	// parse format hostname:port
-	if strings.Contains(host.HostName, ":") {
-		if host.Port != 0 {
-			return nil, fmt.Errorf("port is already set: %v", host.HostName)
-		}
-
-		parts := strings.Split(host.HostName, ":")
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid hostname format: %v", host.HostName)
-		}
-
-		if portInt, err := strconv.Atoi(parts[1]); err != nil {
-			return nil, fmt.Errorf("invalid port format: %v", parts[1])
-		} else if portInt <= 0 || portInt >= 65536 {
-			return nil, fmt.Errorf("invalid port format: %v", parts[1])
-		} else {
-			host.Port = uint16(portInt)
-		}
-		host.HostName = parts[0]
+	// parse format hostname:port (IPv6 aware)
+	host.HostName, host.Port, err = parseHostPort(host.HostName, host.Port)
+	if err != nil {
+		return nil, err
 	}
 
 	// identity files
 	for _, identityFile := range identityFiles {
+		identityFile = expandHomePath(identityFile)
 		if _, err := os.Stat(identityFile); err != nil {
 			continue
 		}
 		host.IdentityFiles = append(host.IdentityFiles, identityFile)
 	}
 
-	host.FillAttrsWithSSHConfig()
+	if err = host.fillSSHConfigAttrs(jumpChain); err != nil {
+		return nil, err
+	}
 
 	logger.Debugf("host: %+#v", host)
 	return host, nil
 }
 
+// parseHostPort parses the "hostname:port" format, IPv6 addresses are
+// supported: "::1" (bare address), "[::1]" and "[::1]:22". The port argument
+// is the already set port (0 when unset), it is kept as is when the input
+// has no port part.
+func parseHostPort(hostname string, port uint16) (string, uint16, error) {
+	if !strings.Contains(hostname, ":") {
+		return hostname, port, nil
+	}
+
+	// bracketed IPv6: "[addr]" or "[addr]:port"
+	if strings.HasPrefix(hostname, "[") {
+		idx := strings.LastIndex(hostname, "]")
+		if idx < 0 {
+			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
+		}
+		addr := hostname[1:idx]
+		rest := hostname[idx+1:]
+		if rest == "" {
+			return addr, port, nil
+		}
+		if !strings.HasPrefix(rest, ":") {
+			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
+		}
+		if port != 0 {
+			return "", 0, fmt.Errorf("port is already set: %v", hostname)
+		}
+		portInt, err := strconv.Atoi(rest[1:])
+		if err != nil || portInt <= 0 || portInt >= 65536 {
+			return "", 0, fmt.Errorf("invalid port format: %v", rest[1:])
+		}
+		return addr, uint16(portInt), nil
+	}
+
+	// bare IPv6 address (multiple colons) has no port part
+	if strings.Count(hostname, ":") > 1 {
+		return hostname, port, nil
+	}
+
+	// hostname:port
+	idx := strings.LastIndex(hostname, ":")
+	addr, portPart := hostname[:idx], hostname[idx+1:]
+	if port != 0 {
+		return "", 0, fmt.Errorf("port is already set: %v", hostname)
+	}
+	portInt, err := strconv.Atoi(portPart)
+	if err != nil || portInt <= 0 || portInt >= 65536 {
+		return "", 0, fmt.Errorf("invalid port format: %v", portPart)
+	}
+	return addr, uint16(portInt), nil
+}
+
+// homeDir returns the current user's home directory.
+func homeDir() string {
+	dir, err := homedir.Dir()
+	if err != nil {
+		return os.Getenv("HOME")
+	}
+	return dir
+}
+
+// expandHomePath expands a leading "~" or "~/" to the user's home directory.
+func expandHomePath(path string) string {
+	if path == "~" {
+		return homeDir()
+	}
+	if strings.HasPrefix(path, "~/") {
+		return filepath.Join(homeDir(), path[2:])
+	}
+	return path
+}
+
 func (host *Host) EndPoint() string {
 	if host.Port == 0 {
 		return host.HostName
+	}
+	if strings.Contains(host.HostName, ":") {
+		// IPv6 address needs brackets around it
+		return fmt.Sprintf("[%v]:%v", host.HostName, host.Port)
 	}
 	return fmt.Sprintf("%v:%v", host.HostName, host.Port)
 }
@@ -175,20 +244,26 @@ func (host *Host) fillPort() {
 
 	// fill port with host name
 	if host.Port == 0 {
-		portInt, err := strconv.Atoi(ssh_config.Get(host.HostName, "Port"))
+		rawPort := ssh_config.Get(host.HostName, "Port")
+		portInt, err := strconv.Atoi(rawPort)
 		if err != nil {
-			return
+			if rawPort != "" {
+				logger.Warnf("invalid port in ssh config: %v", rawPort)
+			}
+		} else if portInt <= 0 || portInt >= 65536 {
+			logger.Warnf("invalid port in ssh config: %v", rawPort)
+		} else {
+			host.Port = uint16(portInt)
 		}
-		host.Port = uint16(portInt)
 	}
 
-	// fill port with host name
+	// default port
 	if host.Port == 0 {
 		host.Port = 22
 	}
 }
 
-func (host *Host) fillProxyJump() {
+func (host *Host) fillProxyJump(jumpChain []string) error {
 	if host.ProxyJump == "" {
 		// fill proxy jump with patterns
 		for _, pattern := range host.Patterns {
@@ -206,17 +281,65 @@ func (host *Host) fillProxyJump() {
 
 	// jump list
 	if host.ProxyJump != "" {
-		for _, jump := range strings.Split(host.ProxyJump, ",") {
-			if jump == "" {
-				continue
-			}
-			jumpHost, err := NewHost("", jump, 0, "", host.IdentityFiles)
-			if err != nil {
-				continue
-			}
-			host.JumpList = append(host.JumpList, jumpHost)
+		jumps, err := buildJumpChain(host.ProxyJump, jumpChain, host.IdentityFiles)
+		if err != nil {
+			return err
 		}
+		host.JumpList = jumps
 	}
+	return nil
+}
+
+// buildJumpChain builds the flattened connection-ordered jump chain for the
+// given ProxyJump value. jumpChain carries the jumps being visited up the
+// recursion to detect cycles. Invalid jumps are reported as errors instead
+// of being silently skipped.
+func buildJumpChain(proxyJump string, jumpChain []string, identityFiles []string) ([]*Host, error) {
+	return buildJumpChainWith(proxyJump, jumpChain, func(jump string, chain []string) (*Host, error) {
+		return newHost("", jump, 0, "", identityFiles, chain)
+	})
+}
+
+func buildJumpChainWith(proxyJump string, jumpChain []string, resolveJump func(jump string, chain []string) (*Host, error)) ([]*Host, error) {
+	chain := make([]*Host, 0)
+	for _, jump := range strings.Split(proxyJump, ",") {
+		if jump == "" {
+			continue
+		}
+		if slices.Contains(jumpChain, jump) {
+			return nil, fmt.Errorf("proxy jump cycle detected: %v", jump)
+		}
+		jumpHost, err := resolveJump(jump, append(slices.Clone(jumpChain), jump))
+		if err != nil {
+			return nil, err
+		}
+		chain = append(chain, jumpHost)
+	}
+	chain = flattenJumpList(chain)
+	// normalized check catches the same host spelled differently ("a" vs
+	// "user@a" vs "a:22") appearing twice in one jump chain
+	seen := make(map[string]bool, len(chain))
+	for _, jumpHost := range chain {
+		endPoint := jumpHost.EndPoint()
+		if seen[endPoint] {
+			return nil, fmt.Errorf("duplicate jump host: %v", jumpHost.Summary())
+		}
+		seen[endPoint] = true
+	}
+	return chain, nil
+}
+
+// flattenJumpList expands nested jump chains into a flat connection-ordered
+// list: each jump's own nested jumps come before the jump itself, e.g.
+// target -> a (a -> b) is flattened to [b, a].
+func flattenJumpList(jumps []*Host) []*Host {
+	flattened := make([]*Host, 0, len(jumps))
+	for _, jump := range jumps {
+		flattened = append(flattened, flattenJumpList(jump.JumpList)...)
+		jump.JumpList = nil
+		flattened = append(flattened, jump)
+	}
+	return flattened
 }
 
 func (host *Host) fillIdentityFiles() {
@@ -231,6 +354,7 @@ func (host *Host) fillIdentityFiles() {
 		}
 		identityFiles := ssh_config.GetAll(pattern, "IdentityFile")
 		for _, identityFile := range identityFiles {
+			identityFile = expandHomePath(identityFile)
 			if _, err := os.Stat(identityFile); err == nil {
 				host.IdentityFiles = append(host.IdentityFiles, identityFile)
 			}
@@ -241,6 +365,7 @@ func (host *Host) fillIdentityFiles() {
 	if len(host.IdentityFiles) == 0 {
 		identityFiles := ssh_config.GetAll(host.HostName, "IdentityFile")
 		for _, identityFile := range identityFiles {
+			identityFile = expandHomePath(identityFile)
 			if _, err := os.Stat(identityFile); err == nil {
 				host.IdentityFiles = append(host.IdentityFiles, identityFile)
 			}
@@ -249,21 +374,28 @@ func (host *Host) fillIdentityFiles() {
 
 	// default identity file
 	if len(host.IdentityFiles) == 0 {
-		defaultIdentityFile := filepath.Join(os.Getenv("HOME"), ".ssh", "id_rsa")
+		defaultIdentityFile := filepath.Join(homeDir(), ".ssh", "id_rsa")
 		if _, err := os.Stat(defaultIdentityFile); err == nil {
 			host.IdentityFiles = []string{defaultIdentityFile}
 		}
 	}
 }
 
-func (host *Host) FillAttrsWithSSHConfig() {
+func (host *Host) FillAttrsWithSSHConfig() error {
+	return host.fillSSHConfigAttrs(nil)
+}
+
+func (host *Host) fillSSHConfigAttrs(jumpChain []string) error {
 	host.fillUsername()
 	host.fillPort()
 	host.fillIdentityFiles()
-	host.fillProxyJump() // must after identity files
+	if err := host.fillProxyJump(jumpChain); err != nil { // must after identity files
+		return err
+	}
 
 	rawHostname := ssh_config.Get(host.HostName, "HostName")
 	if rawHostname != "" {
 		host.HostName = rawHostname
 	}
+	return nil
 }

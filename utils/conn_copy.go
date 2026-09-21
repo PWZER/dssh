@@ -4,14 +4,18 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/PWZER/dssh/logger"
 )
 
+// dialTimeout bounds the dial towards the proxy server.
+const dialTimeout = 30 * time.Second
+
 func CopyConn(src net.Conn, dstAddr string) error {
 	defer src.Close()
 
-	dst, err := net.Dial("tcp", dstAddr)
+	dst, err := net.DialTimeout("tcp", dstAddr, dialTimeout)
 	if err != nil {
 		return fmt.Errorf("Dial to %s failed: %v", dstAddr, err)
 	}

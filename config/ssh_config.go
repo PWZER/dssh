@@ -82,7 +82,12 @@ func GetHostsFromSSHConfig() (hosts []*Host, err error) {
 		}
 
 		// 从正则配置中解析
-		host.FillAttrsWithSSHConfig()
+		if err := host.FillAttrsWithSSHConfig(); err != nil {
+			// enumeration should not be blocked by one bad host entry,
+			// invalid targets are still a hard error for named hosts
+			logger.Warnf("skip host %v: %v", strings.Join(host.Patterns, ","), err)
+			continue
+		}
 
 		// tags
 		if hostConfig.EOLComment != "" {

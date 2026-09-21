@@ -55,7 +55,6 @@ Flags:
       --host string       host name or remove host addr
   -j, --jump string       ssh jump proxy
   -m, --module string     remote run module
-      --parallel int      max parallel run tasks num (default 1)
   -p, --port uint16       remote host port
       --put-dest string   upload remote dest path
       --put-src string    upload local src path

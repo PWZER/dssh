@@ -2,7 +2,9 @@ package ssh
 
 import (
 	"fmt"
+	"net"
 	"os"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -13,6 +15,9 @@ import (
 	"github.com/PWZER/dssh/logger"
 	"github.com/PWZER/dssh/utils"
 )
+
+// dialTimeout bounds the TCP dial and the SSH handshake of every hop.
+const dialTimeout = 30 * time.Second
 
 type Client struct {
 	sshClient  *ssh.Client
@@ -33,12 +38,24 @@ func (c *Client) Connect(host *config.Host) (err error) {
 	if err != nil {
 		return err
 	}
+	// bound the handshake over the tunnel: ClientConfig.Timeout only
+	// applies to ssh.Dial, and the deadline must not leak into the
+	// session afterwards
+	if err = dial.SetDeadline(time.Now().Add(dialTimeout)); err != nil {
+		dial.Close()
+		return err
+	}
 	conn, chans, reqs, err := ssh.NewClientConn(dial, host.EndPoint(), clientConfig)
 	if err != nil {
+		dial.Close()
+		return err
+	}
+	if err = dial.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
 		return err
 	}
 	c.sshClient = ssh.NewClient(conn, chans, reqs)
-	return err
+	return nil
 }
 
 func (c *Client) RequestAgentForwarding(session *ssh.Session) error {
@@ -99,12 +116,16 @@ func (c *Client) Shell(remoteListen, proxyServer string) error {
 
 	// agent forward
 	if err := c.RequestAgentForwarding(session); err != nil {
-		return err
+		logger.Warnf("agent forwarding disabled: %v", err)
 	}
 
 	// remote proxy
 	if remoteListen != "" && proxyServer != "" {
-		go c.RemoteProxy(remoteListen, proxyServer)
+		go func() {
+			if err := c.RemoteProxy(remoteListen, proxyServer); err != nil {
+				logger.Errorf("remote proxy: %v", err)
+			}
+		}()
 	}
 
 	// auto update window size
@@ -142,7 +163,7 @@ func (c *Client) Shell(remoteListen, proxyServer string) error {
 func (c *Client) RemoteProxy(listenAddr, serverAddr string) error {
 	listener, err := c.sshClient.Listen("tcp", listenAddr)
 	if err != nil {
-		return fmt.Errorf("Listen Error: %v", err)
+		return fmt.Errorf("listen %s error: %w", listenAddr, err)
 	}
 	defer listener.Close()
 	logger.Infof("Listening on %s", listenAddr)
@@ -150,12 +171,14 @@ func (c *Client) RemoteProxy(listenAddr, serverAddr string) error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			logger.Errorf("Accept Error: %v", err)
-			continue
+			return fmt.Errorf("accept error: %w", err)
 		}
 		logger.Infof("Accepted from %s", conn.RemoteAddr())
-		if err := utils.CopyConn(conn, serverAddr); err != nil {
-			logger.Errorf("CopyConn Error: %v", err)
-		}
+		go func(conn net.Conn) {
+			defer conn.Close()
+			if err := utils.CopyConn(conn, serverAddr); err != nil {
+				logger.Errorf("CopyConn Error: %v", err)
+			}
+		}(conn)
 	}
 }

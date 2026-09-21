@@ -64,7 +64,6 @@ type TaskConfig struct {
 	DownloadSrc    string
 	DownloadDest   string
 	FailedContinue bool
-	Parallel       int
 	Tasks          []*Task
 }
 
@@ -73,7 +72,6 @@ func NewTaskConfig() *TaskConfig {
 		Username:       "",
 		Port:           0,
 		IdentityFiles:  []string{},
-		Parallel:       1,
 		FailedContinue: false,
 	}
 }
