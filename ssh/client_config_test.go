@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"bufio"
 	"os"
 	"testing"
 )
@@ -32,7 +33,7 @@ func TestDoKeyboardInteractivePipedInput(t *testing.T) {
 	// the test process stdin is not a terminal, both questions fall back
 	// to plain reads
 	swapStdinPipe(t, "answer one\nans wer two")
-	answers, err := doKeyboardInteractive("user", "", []string{"q1: ", "q2: "}, []bool{false, false})
+	answers, err := doKeyboardInteractive(bufio.NewReader(os.Stdin), false)("user", "", []string{"q1: ", "q2: "}, []bool{false, false})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestDoKeyboardInteractivePipedInput(t *testing.T) {
 
 func TestDoKeyboardInteractiveNoTrailingNewline(t *testing.T) {
 	swapStdinPipe(t, "answer one")
-	answers, err := doKeyboardInteractive("user", "", []string{"q1: "}, []bool{false})
+	answers, err := doKeyboardInteractive(bufio.NewReader(os.Stdin), false)("user", "", []string{"q1: "}, []bool{false})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

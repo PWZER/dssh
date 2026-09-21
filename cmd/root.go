@@ -20,13 +20,12 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-
-	homedir "github.com/mitchellh/go-homedir"
 	"github.com/spf13/viper"
 
 	"github.com/PWZER/dssh/config"
 	"github.com/PWZER/dssh/logger"
 	"github.com/PWZER/dssh/ssh"
+	"github.com/PWZER/dssh/utils"
 )
 
 var cfgFile string
@@ -125,9 +124,9 @@ func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
-		home, err := homedir.Dir()
-		if err != nil {
-			fmt.Println(err)
+		home := utils.HomeDir()
+		if home == "" {
+			fmt.Println("home directory not found")
 			os.Exit(1)
 		}
 		viper.AddConfigPath(home)

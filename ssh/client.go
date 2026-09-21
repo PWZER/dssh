@@ -16,9 +16,6 @@ import (
 	"github.com/PWZER/dssh/utils"
 )
 
-// dialTimeout bounds the TCP dial and the SSH handshake of every hop.
-const dialTimeout = 30 * time.Second
-
 type Client struct {
 	sshClient  *ssh.Client
 	sftpClient *sftp.Client
@@ -28,6 +25,8 @@ func NewClient() *Client {
 	return &Client{}
 }
 
+// bound the handshake over the tunnel: chanConn does not support
+// deadlines, close the connection when the handshake hangs
 func (c *Client) Connect(host *config.Host) (err error) {
 	clientConfig := CreateClientConfig(host)
 	if c.sshClient == nil {
@@ -38,20 +37,11 @@ func (c *Client) Connect(host *config.Host) (err error) {
 	if err != nil {
 		return err
 	}
-	// bound the handshake over the tunnel: ClientConfig.Timeout only
-	// applies to ssh.Dial, and the deadline must not leak into the
-	// session afterwards
-	if err = dial.SetDeadline(time.Now().Add(dialTimeout)); err != nil {
-		dial.Close()
-		return err
-	}
+	timer := time.AfterFunc(utils.DialTimeout, func() { dial.Close() })
 	conn, chans, reqs, err := ssh.NewClientConn(dial, host.EndPoint(), clientConfig)
+	timer.Stop()
 	if err != nil {
 		dial.Close()
-		return err
-	}
-	if err = dial.SetDeadline(time.Time{}); err != nil {
-		conn.Close()
 		return err
 	}
 	c.sshClient = ssh.NewClient(conn, chans, reqs)

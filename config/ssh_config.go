@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/PWZER/dssh/logger"
+	"github.com/PWZER/dssh/utils"
 	"github.com/kevinburke/ssh_config"
 )
 
@@ -55,7 +56,7 @@ func hostFromSSHConfig(hostConfig *ssh_config.Host) (host *Host, err error) {
 func GetHostsFromSSHConfig() (hosts []*Host, err error) {
 	hosts = make([]*Host, 0)
 
-	configPath := filepath.Join(os.Getenv("HOME"), ".ssh", "config")
+	configPath := filepath.Join(utils.HomeDir(), ".ssh", "config")
 	if _, err := os.Stat(configPath); err != nil {
 		return hosts, nil
 	}

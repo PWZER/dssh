@@ -7,31 +7,22 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
-	homedir "github.com/mitchellh/go-homedir"
 	gossh "golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 
 	"github.com/PWZER/dssh/logger"
+	"github.com/PWZER/dssh/utils"
 )
 
-// homeDir returns the current user's home directory.
-func homeDir() string {
-	dir, err := homedir.Dir()
-	if err != nil {
-		return os.Getenv("HOME")
-	}
-	return dir
-}
+var knownhostsErrLineRe = regexp.MustCompile(`knownhosts: .+?:(\d+):`)
 
-// knownHostsFiles returns the existing known_hosts file paths, the user file
-// takes precedence over the system one. Missing files are not an error, an
-// empty list means every host key is unknown.
 func knownHostsFiles() []string {
 	paths := []string{}
-	paths = append(paths, filepath.Join(homeDir(), ".ssh", "known_hosts"))
+	paths = append(paths, filepath.Join(utils.HomeDir(), ".ssh", "known_hosts"))
 	paths = append(paths, "/etc/ssh/ssh_known_hosts")
 
 	existing := make([]string, 0, len(paths))
@@ -45,52 +36,105 @@ func knownHostsFiles() []string {
 
 // userKnownHostsFile returns the writable user known_hosts file path.
 func userKnownHostsFile() string {
-	return filepath.Join(homeDir(), ".ssh", "known_hosts")
+	return filepath.Join(utils.HomeDir(), ".ssh", "known_hosts")
 }
 
 // usableRemoteAddr returns the remote address string when it carries real
 // peer information. Connections tunneled through a jump host carry a zero
 // address ("0.0.0.0:0"), which must never be displayed or recorded.
 func usableRemoteAddr(remote net.Addr) string {
-	tcpAddr, ok := remote.(*net.TCPAddr)
-	if !ok {
-		if remote != nil && remote.String() != "" && remote.String() != "0.0.0.0:0" {
-			return remote.String()
+	if remote == nil {
+		return ""
+	}
+	addr := remote.String()
+	if tcpAddr, ok := remote.(*net.TCPAddr); ok {
+		if tcpAddr.IP == nil || tcpAddr.IP.IsUnspecified() || tcpAddr.Port == 0 {
+			return ""
 		}
+		return addr
+	}
+	if addr == "" || addr == "0.0.0.0:0" {
 		return ""
 	}
-	if tcpAddr.IP == nil || tcpAddr.IP.IsUnspecified() || tcpAddr.Port == 0 {
-		return ""
+	return addr
+}
+
+// sanitizeKnownHosts rewrites each known_hosts file into a temporary file
+// containing only parseable lines, OpenSSH style: malformed lines are
+// skipped instead of failing every connection. Returns the temp file paths.
+func sanitizeKnownHosts(paths []string) ([]string, error) {
+	sanitized := make([]string, 0, len(paths))
+	for _, path := range paths {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			logger.Warnf("ignore unreadable known_hosts file %s: %v", path, err)
+			continue
+		}
+
+		lines := strings.Split(string(content), "\n")
+		// drop malformed lines until the file parses cleanly
+		for {
+			// knownhosts.New does not expose its db; validate by loading
+			// the current line set through a temp file
+			tmpValidate, validateErr := os.CreateTemp("", "dssh-known_hosts-validate-*")
+			if validateErr != nil {
+				return nil, validateErr
+			}
+			if _, writeErr := tmpValidate.WriteString(strings.Join(lines, "\n")); writeErr != nil {
+				tmpValidate.Close()
+				return nil, writeErr
+			}
+			tmpValidate.Close()
+			_, dbErr := knownhosts.New(tmpValidate.Name())
+			os.Remove(tmpValidate.Name())
+			if dbErr == nil {
+				break
+			}
+			// error format: "knownhosts: <file>:<line>: <detail>"
+			lineNum := 0
+			if matches := knownhostsErrLineRe.FindStringSubmatch(dbErr.Error()); len(matches) > 1 {
+				fmt.Sscanf(matches[1], "%d", &lineNum)
+			}
+			if lineNum <= 0 || lineNum > len(lines) {
+				// cannot locate the bad line, give up on this file
+				logger.Warnf("ignore malformed known_hosts file %s: %v", path, dbErr)
+				lines = nil
+				break
+			}
+			logger.Warnf("skipped malformed line %d in known_hosts file %s", lineNum, path)
+			lines = append(lines[:lineNum-1], lines[lineNum:]...)
+		}
+		if len(lines) == 0 {
+			continue
+		}
+
+		tmpFile, err := os.CreateTemp("", "dssh-known_hosts-*")
+		if err != nil {
+			return nil, fmt.Errorf("create temp known_hosts file: %w", err)
+		}
+		if _, err := tmpFile.WriteString(strings.Join(lines, "\n")); err != nil {
+			tmpFile.Close()
+			return nil, fmt.Errorf("write temp known_hosts file: %w", err)
+		}
+		tmpFile.Close()
+		sanitized = append(sanitized, tmpFile.Name())
 	}
-	return tcpAddr.String()
+	return sanitized, nil
 }
 
 // newKnownHostsChecker loads the known_hosts files into a checker. Unlike
-// knownhosts.New, one malformed file degrades to being skipped (OpenSSH
-// skips malformed lines) instead of failing every connection.
-func newKnownHostsChecker(paths []string) gossh.HostKeyCallback {
-	for {
-		checker, err := knownhosts.New(paths...)
-		if err == nil {
-			return checker
-		}
-		dropped := false
-		for i, path := range paths {
-			if strings.Contains(err.Error(), path) {
-				logger.Warnf("ignore malformed known_hosts file %s: %v", path, err)
-				paths = append(paths[:i], paths[i+1:]...)
-				dropped = true
-				break
-			}
-		}
-		if !dropped {
-			// no file to drop: treat every host key as unknown (TOFU)
-			logger.Warnf("ignore known_hosts load error, all host keys will be treated as unknown: %v", err)
-			return func(host string, remote net.Addr, key gossh.PublicKey) error {
-				return &knownhosts.KeyError{}
-			}
-		}
+// knownhosts.New, malformed lines are skipped (OpenSSH style) instead of
+// failing every connection.
+func newKnownHostsChecker(paths []string) (gossh.HostKeyCallback, error) {
+	sanitized, err := sanitizeKnownHosts(paths)
+	if err != nil {
+		return nil, err
 	}
+	checker, err := knownhosts.New(sanitized...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load known_hosts: %w", err)
+	}
+	return checker, nil
 }
 
 // confirmHostKey prompts the user to trust an unknown host key, OpenSSH style.
@@ -142,7 +186,10 @@ func appendKnownHost(host, remoteAddr string, key gossh.PublicKey) error {
 // confirmed interactively and appended to the user known_hosts file,
 // changed keys are rejected with a warning.
 func HostKeyCallback(host string, remote net.Addr, key gossh.PublicKey) error {
-	checker := newKnownHostsChecker(knownHostsFiles())
+	checker, checkerErr := newKnownHostsChecker(knownHostsFiles())
+	if checkerErr != nil {
+		return checkerErr
+	}
 	err := checker(host, remote, key)
 	if err == nil {
 		return nil

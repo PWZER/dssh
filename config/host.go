@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,9 +10,9 @@ import (
 	"strings"
 
 	"github.com/kevinburke/ssh_config"
-	homedir "github.com/mitchellh/go-homedir"
 
 	"github.com/PWZER/dssh/logger"
+	"github.com/PWZER/dssh/utils"
 )
 
 type Host struct {
@@ -115,6 +116,9 @@ func parseHostPort(hostname string, port uint16) (string, uint16, error) {
 
 	// bare IPv6 address (multiple colons) has no port part
 	if strings.Count(hostname, ":") > 1 {
+		if net.ParseIP(hostname) == nil {
+			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
+		}
 		return hostname, port, nil
 	}
 
@@ -131,22 +135,13 @@ func parseHostPort(hostname string, port uint16) (string, uint16, error) {
 	return addr, uint16(portInt), nil
 }
 
-// homeDir returns the current user's home directory.
-func homeDir() string {
-	dir, err := homedir.Dir()
-	if err != nil {
-		return os.Getenv("HOME")
-	}
-	return dir
-}
-
 // expandHomePath expands a leading "~" or "~/" to the user's home directory.
 func expandHomePath(path string) string {
 	if path == "~" {
-		return homeDir()
+		return utils.HomeDir()
 	}
 	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(homeDir(), path[2:])
+		return filepath.Join(utils.HomeDir(), path[2:])
 	}
 	return path
 }
@@ -271,6 +266,9 @@ func (host *Host) fillProxyJump(jumpChain []string) error {
 				continue
 			}
 			host.ProxyJump = ssh_config.Get(pattern, "ProxyJump")
+			if host.ProxyJump != "" {
+				break
+			}
 		}
 
 		// fill proxy jump with host name
@@ -374,7 +372,7 @@ func (host *Host) fillIdentityFiles() {
 
 	// default identity file
 	if len(host.IdentityFiles) == 0 {
-		defaultIdentityFile := filepath.Join(homeDir(), ".ssh", "id_rsa")
+		defaultIdentityFile := filepath.Join(utils.HomeDir(), ".ssh", "id_rsa")
 		if _, err := os.Stat(defaultIdentityFile); err == nil {
 			host.IdentityFiles = []string{defaultIdentityFile}
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/PWZER/dssh/config"
 	"github.com/PWZER/dssh/logger"
+	"github.com/PWZER/dssh/utils"
 )
 
 func getPassword(prompt string) (password string, err error) {
@@ -26,41 +27,43 @@ func getPassword(prompt string) (password string, err error) {
 	return password, err
 }
 
-func doKeyboardInteractive(user, instruction string, questions []string, echos []bool) (answers []string, err error) {
-	if instruction != "" {
-		fmt.Println(instruction)
-	}
-	// hidden answers require a real terminal, piped/scripted input falls
-	// back to plain reads so it keeps working non-interactively
-	hidden := term.IsTerminal(int(syscall.Stdin))
-	reader := bufio.NewReader(os.Stdin)
-	readLine := func() (string, error) {
-		line, err := reader.ReadString('\n')
-		// keep the partial line when the input ends without a newline
-		if err != nil && err != io.EOF {
+// readAnswer reads one line from reader. TTY input is read with echo
+// disabled via term.ReadPassword, piped input falls back to plain reads.
+func readAnswer(reader *bufio.Reader, hidden bool) (string, error) {
+	if hidden {
+		byteAnswer, err := term.ReadPassword(int(syscall.Stdin))
+		if err != nil {
 			return "", err
 		}
-		return strings.TrimRight(line, "\r\n"), nil
+		fmt.Println()
+		return strings.TrimSpace(string(byteAnswer)), nil
 	}
-	for i, question := range questions {
-		fmt.Print(question)
-		var answer string
-		if i < len(echos) && !echos[i] && hidden {
-			byteAnswer, err := term.ReadPassword(int(syscall.Stdin))
-			if err != nil {
-				return answers, err
-			}
-			answer = string(byteAnswer)
-			fmt.Println()
-		} else {
-			answer, err = readLine()
-			if err != nil {
-				return answers, err
-			}
+	line, err := reader.ReadString('\n')
+	// keep the partial line when the input ends without a newline
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
+// doKeyboardInteractive answers keyboard-interactive questions. reader is
+// shared across retries so buffered piped input is not discarded between
+// attempts; hidden is computed once for the process.
+func doKeyboardInteractive(reader *bufio.Reader, hidden bool) gossh.KeyboardInteractiveChallenge {
+	return func(user, instruction string, questions []string, echos []bool) (answers []string, err error) {
+		if instruction != "" {
+			fmt.Println(instruction)
 		}
-		answers = append(answers, answer)
+		for i, question := range questions {
+			fmt.Print(question)
+			answer, err := readAnswer(reader, hidden && i < len(echos) && !echos[i])
+			if err != nil {
+				return answers, err
+			}
+			answers = append(answers, answer)
+		}
+		return answers, nil
 	}
-	return answers, nil
 }
 
 func getSignersCallback(host *config.Host) (signers []gossh.Signer, err error) {
@@ -121,15 +124,17 @@ func CreateClientConfig(host *config.Host) *gossh.ClientConfig {
 	}))
 
 	// 二次验证交互等
+	// the reader is shared across retries so buffered piped input is
+	// not discarded between attempts
 	auth = append(auth, gossh.RetryableAuthMethod(
-		gossh.KeyboardInteractiveChallenge(doKeyboardInteractive),
+		doKeyboardInteractive(bufio.NewReader(os.Stdin), term.IsTerminal(int(syscall.Stdin))),
 		3,
 	))
 
 	return &gossh.ClientConfig{
 		User:    host.Username,
 		Auth:    auth,
-		Timeout: dialTimeout,
+		Timeout: utils.DialTimeout,
 		BannerCallback: func(message string) error {
 			fmt.Println(message)
 			return nil
