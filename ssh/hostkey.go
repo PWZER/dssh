@@ -1,14 +1,11 @@
 package ssh
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -18,10 +15,6 @@ import (
 	"github.com/PWZER/dssh/logger"
 	"github.com/PWZER/dssh/utils"
 )
-
-// knownhostsErrLineRe extracts the line number from a knownhosts error,
-// e.g. "knownhosts: /path/to/known_hosts:3: ssh: short read".
-var knownhostsErrLineRe = regexp.MustCompile(`knownhosts: (.+?):(\d+):`)
 
 func knownHostsFiles() []string {
 	paths := []string{}
@@ -64,19 +57,42 @@ func usableRemoteAddr(remote net.Addr) string {
 
 // sanitizeKnownHosts rewrites a single known_hosts file into a temporary
 // file containing only parseable lines, OpenSSH style: malformed lines are
-// skipped instead of failing every connection. Returns the temp file path
-// and whether any line was dropped. The caller must remove the temp file.
+// skipped instead of failing every connection. The caller has already
+// determined the file is not clean. The returned temp file is removed on
+// every error path; on success the caller owns it.
 func sanitizeKnownHosts(path string) (string, error) {
+	// fast path: a clean file needs no temp copy
+	if _, err := knownhosts.New(path); err == nil {
+		return "", nil
+	}
+
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
 
-	lines := strings.Split(string(content), "\n")
-	// validate the whole file first; only enter the cleanup loop when a
-	// malformed line is present
-	if _, err := knownhosts.New(path); err == nil {
-		return "", nil // clean, no temp file needed
+	// validate each line independently, keep only parseable ones
+	lines := make([]string, 0, strings.Count(string(content), "\n"))
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			lines = append(lines, line)
+			continue
+		}
+		linePath := writeLineTemp(line)
+		if linePath == "" {
+			return "", fmt.Errorf("create temp file for line validation")
+		}
+		_, err := knownhosts.New(linePath)
+		os.Remove(linePath)
+		if err != nil {
+			logger.Warnf("skipped malformed line in known_hosts file %s", path)
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if strings.TrimSpace(strings.Join(lines, "\n")) == "" {
+		return "", fmt.Errorf("no valid lines in known_hosts file %s", path)
 	}
 
 	tmpFile, err := os.CreateTemp("", "dssh-known_hosts-*")
@@ -84,72 +100,73 @@ func sanitizeKnownHosts(path string) (string, error) {
 		return "", fmt.Errorf("create temp known_hosts file: %w", err)
 	}
 	defer tmpFile.Close()
+	// remove the temp copy on every error path, on success ownership is
+	// handed to the caller by disarming this cleanup
+	tmpPath := tmpFile.Name()
+	defer func() {
+		if tmpPath != "" {
+			os.Remove(tmpPath)
+		}
+	}()
 
-	// drop malformed lines until the file parses cleanly
-	for {
-		joined := strings.Join(lines, "\n")
-		// ensure trailing newline for knownhosts parser
-		if !strings.HasSuffix(joined, "\n") {
-			joined += "\n"
-		}
-		// truncate and seek before writing to replace previous content
-		if err := tmpFile.Truncate(0); err != nil {
-			return "", fmt.Errorf("truncate temp known_hosts file: %w", err)
-		}
-		if _, err := tmpFile.Seek(0, 0); err != nil {
-			return "", fmt.Errorf("seek temp known_hosts file: %w", err)
-		}
-		if _, err := tmpFile.WriteString(joined); err != nil {
-			return "", fmt.Errorf("write temp known_hosts file: %w", err)
-		}
+	joined := strings.Join(lines, "\n")
+	if !strings.HasSuffix(joined, "\n") {
+		joined += "\n"
+	}
+	if _, err := tmpFile.WriteString(joined); err != nil {
+		return "", fmt.Errorf("write temp known_hosts file: %w", err)
+	}
+	owned := tmpPath
+	tmpPath = "" // disarm the deferred cleanup
+	return owned, nil
+}
 
-		_, dbErr := knownhosts.New(tmpFile.Name())
-		if dbErr == nil {
-			break
-		}
-		// error format: "knownhosts: <file>:<line>: <detail>"
-		matches := knownhostsErrLineRe.FindStringSubmatch(dbErr.Error())
-		if len(matches) < 3 {
-			logger.Warnf("ignore malformed known_hosts file %s: %v", path, dbErr)
-			return "", fmt.Errorf("cannot locate malformed line in %s", path)
-		}
-		lineNum, err := strconv.Atoi(matches[2])
-		if err != nil || lineNum <= 0 || lineNum > len(lines) {
-			logger.Warnf("ignore malformed known_hosts file %s: %v", path, dbErr)
-			return "", fmt.Errorf("invalid line number in error: %v", dbErr)
-		}
-		logger.Warnf("skipped malformed line %d in known_hosts file %s", lineNum, path)
-		lines = append(lines[:lineNum-1], lines[lineNum:]...)
+// writeLineTemp writes a single line to a temp file and returns its path.
+func writeLineTemp(line string) string {
+	tmp, err := os.CreateTemp("", "dssh-known_hosts-line-*")
+	if err != nil {
+		return ""
 	}
-	if len(lines) == 0 {
-		return "", fmt.Errorf("no valid lines in known_hosts file %s", path)
-	}
-	return tmpFile.Name(), nil
+	tmp.WriteString(line + "\n")
+	tmp.Close()
+	return tmp.Name()
 }
 
 // newKnownHostsChecker loads the known_hosts files into a checker. Unlike
 // knownhosts.New, malformed lines are skipped (OpenSSH style) instead of
-// failing every connection. Temp files are cleaned up by the caller.
-func newKnownHostsChecker(paths []string) (gossh.HostKeyCallback, []string, error) {
-	sanitized := make([]string, 0, len(paths))
+// failing every connection. Temp copies are removed before returning: the
+// checker parses everything into memory.
+func newKnownHostsChecker(paths []string) (gossh.HostKeyCallback, error) {
+	loadPaths := make([]string, 0, len(paths))
+	var tempPaths []string
+	defer func() {
+		for _, p := range tempPaths {
+			os.Remove(p)
+		}
+	}()
+
 	for _, path := range paths {
 		tmpPath, err := sanitizeKnownHosts(path)
 		if err != nil {
 			logger.Warnf("failed to sanitize known_hosts file %s: %v", path, err)
 			continue
 		}
-		if tmpPath != "" {
-			sanitized = append(sanitized, tmpPath)
+		if tmpPath == "" {
+			loadPaths = append(loadPaths, path)
 		} else {
-			sanitized = append(sanitized, path)
+			tempPaths = append(tempPaths, tmpPath)
+			loadPaths = append(loadPaths, tmpPath)
 		}
 	}
-	checker, err := knownhosts.New(sanitized...)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to load known_hosts: %w", err)
+
+	if len(loadPaths) == 0 {
+		return nil, fmt.Errorf("no usable known_hosts file")
 	}
-	// return temp paths so the caller can clean them up
-	return checker, sanitized, nil
+	checker, err := knownhosts.New(loadPaths...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load known_hosts: %w", err)
+	}
+	return checker, nil
 }
 
 // confirmHostKey prompts the user to trust an unknown host key, OpenSSH style.
@@ -161,7 +178,7 @@ func confirmHostKey(host, remoteAddr string, key gossh.PublicKey) bool {
 	fmt.Printf("%s key fingerprint is %s.\n", key.Type(), gossh.FingerprintSHA256(key))
 	fmt.Print("Are you sure you want to continue connecting (yes/no)? ")
 
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	line, err := stdinBufioReader().ReadString('\n')
 	if err != nil {
 		return false
 	}
@@ -201,19 +218,10 @@ func appendKnownHost(host, remoteAddr string, key gossh.PublicKey) error {
 // confirmed interactively and appended to the user known_hosts file,
 // changed keys are rejected with a warning.
 func HostKeyCallback(host string, remote net.Addr, key gossh.PublicKey) error {
-	checker, sanitized, checkerErr := newKnownHostsChecker(knownHostsFiles())
+	checker, checkerErr := newKnownHostsChecker(knownHostsFiles())
 	if checkerErr != nil {
 		return checkerErr
 	}
-	// clean up temp files after verification
-	defer func() {
-		for _, path := range sanitized {
-			if strings.HasPrefix(filepath.Base(path), "dssh-known_hosts-") {
-				os.Remove(path)
-			}
-		}
-	}()
-
 	err := checker(host, remote, key)
 	if err == nil {
 		return nil

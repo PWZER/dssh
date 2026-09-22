@@ -77,12 +77,12 @@ func GetHostsFromSSHConfig() (hosts []*Host, err error) {
 			return hosts, err
 		}
 
-		// 没有 HostName 的都是正则类型的配置
+		// entries without HostName are wildcard-style configs
 		if host.HostName == "" {
 			continue
 		}
 
-		// 从正则配置中解析
+		// resolve attributes from wildcard config entries
 		if err := host.FillAttrsWithSSHConfig(); err != nil {
 			// enumeration should not be blocked by one bad host entry,
 			// invalid targets are still a hard error for named hosts

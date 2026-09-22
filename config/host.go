@@ -2,12 +2,13 @@ package config
 
 import (
 	"fmt"
-	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/kevinburke/ssh_config"
 
@@ -86,17 +87,21 @@ func newHost(username, hostname string, port uint16, proxyJump string, identityF
 // is the already set port (0 when unset), it is kept as is when the input
 // has no port part.
 func parseHostPort(hostname string, port uint16) (string, uint16, error) {
-	if !strings.Contains(hostname, ":") {
-		return hostname, port, nil
-	}
-
-	// bracketed IPv6: "[addr]" or "[addr]:port"
+	// bracketed: "[host]", "[host]:port" or "[ipv6%zone]:port"; an address
+	// that parses as IPv6 must carry a usable zone, anything else is
+	// treated as a plain host name (scp-style [hostname]:port)
 	if strings.HasPrefix(hostname, "[") {
 		idx := strings.LastIndex(hostname, "]")
 		if idx < 0 {
 			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
 		}
 		addr := hostname[1:idx]
+		if addr == "" {
+			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
+		}
+		if parsed, err := netip.ParseAddr(addr); err == nil && !validZone(parsed.Zone()) {
+			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
+		}
 		rest := hostname[idx+1:]
 		if rest == "" {
 			return addr, port, nil
@@ -114,14 +119,16 @@ func parseHostPort(hostname string, port uint16) (string, uint16, error) {
 		return addr, uint16(portInt), nil
 	}
 
-	// bare IPv6 address (multiple colons) has no port part
+	if !strings.Contains(hostname, ":") {
+		return hostname, port, nil
+	}
+
+	// bare IPv6 address (multiple colons) has no port part; netip.ParseAddr
+	// validates the address and its zone id, e.g. fe80::1%eth0, while a
+	// zone not usable as an interface name stays rejected
 	if strings.Count(hostname, ":") > 1 {
-		// strip zone id for validation, e.g. fe80::1%eth0
-		addr := hostname
-		if idx := strings.Index(addr, "%"); idx > 0 {
-			addr = addr[:idx]
-		}
-		if net.ParseIP(addr) == nil {
+		addr, err := netip.ParseAddr(hostname)
+		if err != nil || !validZone(addr.Zone()) {
 			return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
 		}
 		return hostname, port, nil
@@ -130,6 +137,9 @@ func parseHostPort(hostname string, port uint16) (string, uint16, error) {
 	// hostname:port
 	idx := strings.LastIndex(hostname, ":")
 	addr, portPart := hostname[:idx], hostname[idx+1:]
+	if addr == "" {
+		return "", 0, fmt.Errorf("invalid hostname format: %v", hostname)
+	}
 	if port != 0 {
 		return "", 0, fmt.Errorf("port is already set: %v", hostname)
 	}
@@ -138,6 +148,23 @@ func parseHostPort(hostname string, port uint16) (string, uint16, error) {
 		return "", 0, fmt.Errorf("invalid port format: %v", portPart)
 	}
 	return addr, uint16(portInt), nil
+}
+
+// validZone reports whether an IPv6 zone id is usable as an interface
+// name: the kernel forbids ':', '/' and whitespace, '.'/'..' are reserved,
+// '%' would be ambiguous in textual addresses. An empty zone (no zone id
+// at all) is valid.
+func validZone(zone string) bool {
+	if zone == "" {
+		return true
+	}
+	if zone == "." || zone == ".." {
+		return false
+	}
+	if strings.ContainsAny(zone, ":/%") {
+		return false
+	}
+	return strings.IndexFunc(zone, unicode.IsSpace) < 0
 }
 
 // expandHomePath expands a leading "~" or "~/" to the user's home directory.

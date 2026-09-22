@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -15,6 +16,18 @@ import (
 	"github.com/PWZER/dssh/logger"
 	"github.com/PWZER/dssh/utils"
 )
+
+var (
+	stdinReaderOnce sync.Once
+	stdinReader     *bufio.Reader
+)
+
+// stdinBufioReader returns the process-wide shared reader for stdin so
+// buffered piped input is not discarded between auth prompts and retries.
+func stdinBufioReader() *bufio.Reader {
+	stdinReaderOnce.Do(func() { stdinReader = bufio.NewReader(os.Stdin) })
+	return stdinReader
+}
 
 // readAnswer reads one line from reader. TTY input is read with echo
 // disabled via term.ReadPassword, piped input falls back to plain reads.
@@ -37,7 +50,7 @@ func readAnswer(reader *bufio.Reader, hidden bool) (string, error) {
 
 func getPassword(prompt string) (string, error) {
 	fmt.Print(prompt)
-	return readAnswer(bufio.NewReader(os.Stdin), term.IsTerminal(int(syscall.Stdin)))
+	return readAnswer(stdinBufioReader(), term.IsTerminal(int(syscall.Stdin)))
 }
 
 // doKeyboardInteractive answers keyboard-interactive questions. reader is
@@ -61,7 +74,7 @@ func doKeyboardInteractive(reader *bufio.Reader, hidden bool) gossh.KeyboardInte
 }
 
 func getSignersCallback(host *config.Host) (signers []gossh.Signer, err error) {
-	// 优先使用 ssh-agent 中已有的私钥
+	// prefer private keys already held by ssh-agent
 	if a, err := NewAgent(); err != nil {
 		logger.Warnf("ssh-agent error: %v", err)
 	} else if agentSigners, err := a.Signers(); err != nil {
@@ -70,7 +83,7 @@ func getSignersCallback(host *config.Host) (signers []gossh.Signer, err error) {
 		signers = append(signers, agentSigners...)
 	}
 
-	// 使用私钥文件
+	// private key files
 	for _, identityFile := range host.IdentityFiles {
 		privateKeyBytes, err := os.ReadFile(identityFile)
 		if err != nil {
@@ -84,7 +97,7 @@ func getSignersCallback(host *config.Host) (signers []gossh.Signer, err error) {
 				continue
 			}
 
-			// 输入私钥密码
+			// ask for the private key passphrase
 			prompt := fmt.Sprintf("[%s] Enter Identity Passphrase (%s)", host.Summary(), identityFile)
 			password, err := getPassword(prompt)
 			if err != nil {
@@ -107,21 +120,20 @@ func getSignersCallback(host *config.Host) (signers []gossh.Signer, err error) {
 func CreateClientConfig(host *config.Host) *gossh.ClientConfig {
 	var auth []gossh.AuthMethod
 
-	// 私钥
+	// private keys
 	auth = append(auth, gossh.PublicKeysCallback(func() (signers []gossh.Signer, err error) {
 		return getSignersCallback(host)
 	}))
 
-	// 私钥无法登录时，使用输入密码的方式
+	// fall back to typed password when key auth fails
 	auth = append(auth, gossh.PasswordCallback(func() (string, error) {
 		return getPassword(fmt.Sprintf("[%s] Enter Password: ", host.Summary()))
 	}))
 
-	// 二次验证交互等
-	// the reader is shared across retries so buffered piped input is
-	// not discarded between attempts
+	// keyboard-interactive (2FA etc.), the shared stdin reader keeps
+	// buffered piped input across retries
 	auth = append(auth, gossh.RetryableAuthMethod(
-		doKeyboardInteractive(bufio.NewReader(os.Stdin), term.IsTerminal(int(syscall.Stdin))),
+		doKeyboardInteractive(stdinBufioReader(), term.IsTerminal(int(syscall.Stdin))),
 		3,
 	))
 

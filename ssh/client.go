@@ -40,13 +40,14 @@ func (c *Client) Connect(host *config.Host) (err error) {
 	timer := time.AfterFunc(utils.DialTimeout, func() { dial.Close() })
 	conn, chans, reqs, err := ssh.NewClientConn(dial, host.EndPoint(), clientConfig)
 	if !timer.Stop() {
-		// timer already fired, the connection was closed by the callback
+		// the timer fired and closed the connection; a genuine error
+		// racing with the timeout keeps its cause in the message
 		if err == nil {
 			conn.Close()
 			return fmt.Errorf("handshake timeout for %s", host.EndPoint())
 		}
-		dial.Close()
-		return err
+		return fmt.Errorf("handshake failed for %s after %s: %w",
+			host.EndPoint(), utils.DialTimeout, err)
 	}
 	if err != nil {
 		dial.Close()
@@ -72,6 +73,9 @@ func (c *Client) MakeSession() (*ssh.Session, error) {
 	if err != nil {
 		return session, err
 	}
+	// read os.Stdin directly: x/crypto's session stdin copier keeps reading
+	// after the session ends, so a shared reader would race with the next
+	// task's auth prompts
 	session.Stdin = os.Stdin
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
